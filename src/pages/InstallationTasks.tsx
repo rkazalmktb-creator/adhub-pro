@@ -831,6 +831,7 @@ export default function InstallationTasks() {
         
         return (
           String(t.contract_id).includes(search) ||
+          (t.task_name || '').toLowerCase().includes(search) ||
           contract?.['Customer Name']?.toLowerCase().includes(search) ||
           contract?.['Ad Type']?.toLowerCase().includes(search) ||
           taskBillboards.some(b => 
@@ -859,8 +860,9 @@ export default function InstallationTasks() {
       billboardIds: number[];
       teamId: string | null;
       taskType: 'installation' | 'reinstallation';
+      task_name?: string;
     }) => {
-      const { contractId, teamId, taskType } = vars;
+      const { contractId, teamId, taskType, task_name } = vars;
       let { billboardIds } = vars;
 
       if (!contractId) throw new Error('يرجى اختيار عقد');
@@ -908,6 +910,7 @@ export default function InstallationTasks() {
               status: 'pending',
               task_type: 'reinstallation',
               reinstallation_number: nextNumber,
+              task_name: task_name,
             })
             .select()
             .single();
@@ -934,6 +937,7 @@ export default function InstallationTasks() {
                 team_id: teamId,
                 status: 'pending',
                 task_type: 'installation',
+                task_name: task_name,
               })
               .select()
               .single();
@@ -1046,6 +1050,7 @@ export default function InstallationTasks() {
               status: 'pending',
               task_type: 'reinstallation',
               reinstallation_number: nextReinstallNumber,
+              task_name: task_name,
             })
             .select()
             .single();
@@ -1071,6 +1076,7 @@ export default function InstallationTasks() {
                 team_id: autoTeamId,
                 status: 'pending',
                 task_type: 'installation',
+                task_name: task_name,
               })
               .select()
               .single();
@@ -2126,6 +2132,7 @@ export default function InstallationTasks() {
               isMergedTask={selectedIsMergedTask}
               derivedContractIds={selectedDerivedContractIds}
               onBack={() => setSelectedTaskId(null)}
+              onSwitchTask={setSelectedTaskId}
               onManageDesigns={() => { setSelectedTaskForDesign(selectedTaskId); setDesignDialogOpen(true); }}
               onDistributeDesigns={() => {
                 if (selectedTaskDesigns.length === 0) { toast.info('يرجى إضافة تصاميم أولاً'); setSelectedTaskForDesign(selectedTaskId); setDesignDialogOpen(true); return; }
@@ -2538,7 +2545,7 @@ export default function InstallationTasks() {
         onTaskTypeChange={setTaskType}
         teams={teams as any}
         isSubmitting={createTaskMutation.isPending}
-        onSubmit={({ contractIds, customerId, billboardIds, teamAssignments }) => {
+        onSubmit={({ contractIds, customerId, billboardIds, teamAssignments, task_name }) => {
           // إذا كان هناك تعيينات للفرق، ننشئ مهمة لكل فرقة
           if (teamAssignments.length > 0) {
             teamAssignments.forEach(assignment => {
@@ -2547,6 +2554,7 @@ export default function InstallationTasks() {
                 billboardIds: assignment.billboardIds,
                 teamId: assignment.teamId,
                 taskType,
+                task_name,
               });
             });
           } else {
@@ -2556,6 +2564,7 @@ export default function InstallationTasks() {
               billboardIds,
               teamId: null,
               taskType,
+              task_name,
             });
           }
         }}

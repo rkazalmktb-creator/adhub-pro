@@ -91,6 +91,12 @@ export function BillboardTaskCard({
   const [saving, setSaving] = useState(false);
   const [hasCutout, setHasCutout] = useState<boolean>(item.has_cutout || false);
   const [customerInstallationCost, setCustomerInstallationCost] = useState<number>(item.customer_installation_cost || 0);
+  const [customerOriginalInstallCost, setCustomerOriginalInstallCost] = useState<number>(item.customer_original_install_cost || 0);
+  const [customerReinstallCost, setCustomerReinstallCost] = useState<number>(item.customer_reinstall_cost || 0);
+  const [isOriginalCostEditable, setIsOriginalCostEditable] = useState(false);
+  const [isReinstallCostEditable, setIsReinstallCostEditable] = useState(false);
+  const [tempOriginalCost, setTempOriginalCost] = useState<number>(0);
+  const [tempReinstallCost, setTempReinstallCost] = useState<number>(0);
   const [companyInstallationCost, setCompanyInstallationCost] = useState<number | null>(item.company_installation_cost);
   const [isCompanyCostEditable, setIsCompanyCostEditable] = useState(false);
   const [savingCompanyCost, setSavingCompanyCost] = useState(false);
@@ -108,14 +114,13 @@ export function BillboardTaskCard({
   const [savingAdditionalCost, setSavingAdditionalCost] = useState(false);
   const [replaceDialogOpen, setReplaceDialogOpen] = useState(false);
   const [editReplacementOpen, setEditReplacementOpen] = useState(false);
+  const [isFinancialsExpanded, setIsFinancialsExpanded] = useState(false);
   const [photoHistoryOpen, setPhotoHistoryOpen] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
-  const [isFinancialsExpanded, setIsFinancialsExpanded] = useState(false);
 
-  // Calculate company cost
-  const totalReinstalledFaces = item.total_reinstalled_faces || 0;
   const effectiveInstallationPrice = (() => {
-    if (installationPrice <= 0) return 0;
+    if (!installationPrice) return 0;
+    const totalReinstalledFaces = item.total_reinstalled_faces || 0;
     if (totalReinstalledFaces > 0) {
       return installationPrice * (totalReinstalledFaces * 0.5);
     }
@@ -132,6 +137,14 @@ export function BillboardTaskCard({
   useEffect(() => {
     setCustomerInstallationCost(item.customer_installation_cost || 0);
   }, [item.customer_installation_cost]);
+
+  useEffect(() => {
+    setCustomerOriginalInstallCost(item.customer_original_install_cost || 0);
+  }, [item.customer_original_install_cost]);
+
+  useEffect(() => {
+    setCustomerReinstallCost(item.customer_reinstall_cost || 0);
+  }, [item.customer_reinstall_cost]);
 
   useEffect(() => {
     setCompanyInstallationCost(item.company_installation_cost);
@@ -378,6 +391,183 @@ export function BillboardTaskCard({
     }
   };
 
+  const handleCustomerOriginalCostSave = async (val: number) => {
+    try {
+      setSavingCost(true);
+      const { error } = await supabase
+        .from('installation_task_items')
+        .update({ customer_original_install_cost: val } as any)
+        .eq('id', item.id);
+
+      if (error) throw error;
+      toast.success('تم تحديث تكلفة التركيب الأصلية');
+      setCustomerOriginalInstallCost(val);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Error updating customer original installation cost:', error);
+      toast.error('فشل في تحديث التكلفة الأصلية');
+      setCustomerOriginalInstallCost(item.customer_original_install_cost || 0);
+    } finally {
+      setSavingCost(false);
+    }
+  };
+
+  const handleCustomerReinstallCostSave = async (val: number) => {
+    try {
+      setSavingCost(true);
+      const { error } = await supabase
+        .from('installation_task_items')
+        .update({ 
+          customer_installation_cost: val,
+          customer_reinstall_cost: val 
+        } as any)
+        .eq('id', item.id);
+
+      if (error) throw error;
+      toast.success('تم تحديث تكلفة إعادة التركيب للزبون');
+      setCustomerReinstallCost(val);
+      setCustomerInstallationCost(val);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Error updating customer reinstall cost:', error);
+      toast.error('فشل في تحديث تكلفة إعادة التركيب');
+      setCustomerReinstallCost(item.customer_reinstall_cost || 0);
+      setCustomerInstallationCost(item.customer_installation_cost || 0);
+    } finally {
+      setSavingCost(false);
+    }
+  };
+
+  const handleUndoReinstall = async () => {
+    if (!await systemConfirm({
+      title: 'التراجع عن إعادة التركيب',
+      message: 'هل أنت متأكد من رغبتك في التراجع عن إعادة التركيب لهذه اللوحة واستعادة حالة وصور التركيب السابقة؟',
+      confirmText: 'نعم، تراجع',
+      cancelText: 'إلغاء'
+    })) return;
+
+    try {
+      setSaving(true);
+      
+      const { data: historyItems, error: historyError } = await supabase
+        .from('installation_photo_history')
+        .select('*')
+        .eq('task_item_id', item.id)
+        .order('reinstall_number', { ascending: false })
+        .limit(1);
+
+      if (historyError) throw historyError;
+
+      const currentReinstallCount = item.reinstall_count || 0;
+      const nextReinstallCount = Math.max(0, currentReinstallCount - 1);
+      
+      const updateData: any = {
+        reinstall_count: nextReinstallCount,
+        status: 'completed',
+      };
+
+      if (nextReinstallCount === 0) {
+        updateData.replacement_status = null;
+        updateData.replacement_reason = null;
+        updateData.replacement_cost_bearer = null;
+        updateData.replacement_cost_percentage = null;
+        updateData.reinstalled_faces = null;
+        updateData.total_reinstalled_faces = 0;
+        updateData.faces_to_install = billboard?.Faces_Count || 2;
+        updateData.customer_reinstall_cost = 0;
+        updateData.customer_installation_cost = item.customer_original_install_cost || item.customer_installation_cost || 0;
+      } else {
+        updateData.replacement_status = 'reinstalled';
+      }
+
+      if (historyItems && historyItems.length > 0) {
+        const lastHistory = historyItems[0];
+        updateData.installed_image_face_a_url = lastHistory.installed_image_face_a_url;
+        updateData.installed_image_face_b_url = lastHistory.installed_image_face_b_url;
+        updateData.installation_date = lastHistory.installation_date;
+
+        const { error: deleteError } = await supabase
+          .from('installation_photo_history')
+          .delete()
+          .eq('id', lastHistory.id);
+
+        if (deleteError) throw deleteError;
+      } else {
+        updateData.installed_image_face_a_url = null;
+        updateData.installed_image_face_b_url = null;
+        updateData.installation_date = null;
+        updateData.status = 'pending';
+      }
+
+      const { error: updateError } = await supabase
+        .from('installation_task_items')
+        .update(updateData)
+        .eq('id', item.id);
+
+      if (updateError) throw updateError;
+
+      toast.success('تم التراجع عن إعادة التركيب بنجاح');
+      onRefresh?.();
+    } catch (err) {
+      console.error('Error undoing reinstall:', err);
+      toast.error('حدث خطأ أثناء التراجع عن إعادة التركيب');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUndoReplacement = async () => {
+    if (!await systemConfirm({
+      title: 'التراجع عن الاستبدال',
+      message: 'هل أنت متأكد من إلغاء عملية استبدال هذه اللوحة؟ سيتم مسح حالة الاستبدال وحذف اللوحة البديلة المضافة.',
+      confirmText: 'نعم، تراجع',
+      cancelText: 'إلغاء'
+    })) return;
+
+    try {
+      setSaving(true);
+      
+      if (item.replaces_item_id) {
+        await supabase.from('installation_task_items').update({
+          replacement_status: null,
+          replaced_by_item_id: null,
+          replacement_reason: null,
+          replacement_cost_bearer: null,
+          replacement_cost_percentage: null
+        } as any).eq('id', item.replaces_item_id);
+        
+        await supabase.from('installation_task_items').delete().eq('id', item.id);
+      } else if (item.replaced_by_item_id) {
+        await supabase.from('installation_task_items').delete().eq('id', item.replaced_by_item_id);
+        
+        await supabase.from('installation_task_items').update({
+          replacement_status: null,
+          replaced_by_item_id: null,
+          replacement_reason: null,
+          replacement_cost_bearer: null,
+          replacement_cost_percentage: null
+        } as any).eq('id', item.id);
+      } else {
+        await supabase.from('installation_task_items').update({
+          replacement_status: null,
+          replaced_by_item_id: null,
+          replaces_item_id: null,
+          replacement_reason: null,
+          replacement_cost_bearer: null,
+          replacement_cost_percentage: null
+        } as any).eq('id', item.id);
+      }
+
+      toast.success('تم التراجع عن الاستبدال بنجاح');
+      onRefresh?.();
+    } catch (err) {
+      console.error('Error undoing replacement:', err);
+      toast.error('حدث خطأ أثناء التراجع عن الاستبدال');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const selectedDesign = taskDesigns.find(d => d.id === selectedDesignId);
   const isDelayed = !isCompleted && item.created_at && differenceInDays(new Date(), new Date(item.created_at)) > 15;
   const delayDays = item.created_at ? differenceInDays(new Date(), new Date(item.created_at)) : 0;
@@ -432,144 +622,219 @@ export function BillboardTaskCard({
   );
 
   // Financial comparative calculator cards
-  const renderFinancialCalculator = () => (
-    <div className="pt-2 border-t border-border/45 space-y-2" onClick={(e) => e.stopPropagation()}>
-      <button
-        onClick={() => setIsFinancialsExpanded(!isFinancialsExpanded)}
-        className="w-full flex items-center justify-between text-xs py-2.5 px-3 bg-muted/40 hover:bg-muted/60 border border-border/40 rounded-xl transition-all"
-      >
-        <span className="font-extrabold text-muted-foreground flex items-center gap-1.5">
-          <DollarSign className="h-4 w-4 text-primary shrink-0" />
-          التكاليف والأسعار
-        </span>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 text-[11px] font-black">
-            <span className="text-emerald-500">الشركة: {displayCompanyCost.toLocaleString('en-US')} د.ل</span>
-            {customerInstallationCost > 0 && (
-              <span className="text-blue-500">الزبون: {customerInstallationCost.toLocaleString('en-US')} د.ل</span>
-            )}
+  const renderFinancialCalculator = () => {
+    const isReinstalled = (item.reinstall_count || 0) > 0;
+    const totalCustomerCost = isReinstalled
+      ? (customerOriginalInstallCost + customerReinstallCost)
+      : customerInstallationCost;
+
+    return (
+      <div className="pt-2 border-t border-border/45 space-y-2" onClick={(e) => e.stopPropagation()}>
+        <button
+          onClick={() => setIsFinancialsExpanded(!isFinancialsExpanded)}
+          className="w-full flex items-center justify-between text-xs py-2.5 px-3 bg-muted/40 hover:bg-muted/60 border border-border/40 rounded-xl transition-all"
+        >
+          <span className="font-extrabold text-muted-foreground flex items-center gap-1.5">
+            <DollarSign className="h-4 w-4 text-primary shrink-0" />
+            التكاليف والأسعار
+          </span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 text-[11px] font-black">
+              <span className="text-emerald-500">الشركة: {displayCompanyCost.toLocaleString('en-US')} د.ل</span>
+              {totalCustomerCost > 0 && (
+                <span className="text-blue-500">
+                  الزبون: {totalCustomerCost.toLocaleString('en-US')} د.ل
+                  {isReinstalled && (
+                    <span className="text-[9px] text-muted-foreground mr-1">({customerOriginalInstallCost} + {customerReinstallCost})</span>
+                  )}
+                </span>
+              )}
+            </div>
+            {isFinancialsExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
           </div>
-          {isFinancialsExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-        </div>
-      </button>
+        </button>
 
-      <AnimatePresence initial={false}>
-        {isFinancialsExpanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden space-y-3 pt-1"
-          >
-            {/* Inline Cards */}
-            <div className="grid grid-cols-2 gap-2.5">
-              {/* Company Cost */}
-              <div className="bg-emerald-500/[0.02] border border-emerald-500/10 p-3 rounded-xl flex flex-col justify-between gap-1.5 shadow-sm">
-                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 leading-none">تكلفة فرقة التركيب</span>
-                <div>
-                  {isCompanyCostEditable ? (
-                    <div className="flex items-center gap-1">
-                      <Input
-                        type="number"
-                        min="0"
-                        value={companyInstallationCost === null ? '' : companyInstallationCost}
-                        onChange={(e) => setCompanyInstallationCost(e.target.value === '' ? null : Number(e.target.value))}
-                        className="h-7 w-20 text-xs font-bold pl-1 bg-background border-border"
-                        autoFocus
-                      />
-                      <Button size="sm" className="h-7 px-1.5 text-[9px] font-bold" onClick={handleCompanyCostSave} disabled={savingCompanyCost}>
-                        حفظ
-                      </Button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => { setIsCompanyCostEditable(true); setCompanyInstallationCost(displayCompanyCost); }}
-                      className="font-black text-sm text-foreground hover:underline flex items-center gap-1 leading-none animate-in fade-in duration-200"
-                    >
-                      <span>{displayCompanyCost.toLocaleString('en-US')} د.ل</span>
-                      <Pencil className="h-3 w-3 text-muted-foreground" />
-                    </button>
-                  )}
+        <AnimatePresence initial={false}>
+          {isFinancialsExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden space-y-3 pt-1"
+            >
+              {/* Inline Cards */}
+              <div className="grid grid-cols-2 gap-2.5">
+                {/* Company Cost */}
+                <div className="bg-emerald-500/[0.02] border border-emerald-500/10 p-3 rounded-xl flex flex-col justify-between gap-1.5 shadow-sm">
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 leading-none">تكلفة فرقة التركيب</span>
+                  <div>
+                    {isCompanyCostEditable ? (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          min="0"
+                          value={companyInstallationCost === null ? '' : companyInstallationCost}
+                          onChange={(e) => setCompanyInstallationCost(e.target.value === '' ? null : Number(e.target.value))}
+                          className="h-7 w-20 text-xs font-bold pl-1 bg-background border-border"
+                          autoFocus
+                        />
+                        <Button size="sm" className="h-7 px-1.5 text-[9px] font-bold" onClick={handleCompanyCostSave} disabled={savingCompanyCost}>
+                          حفظ
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setIsCompanyCostEditable(true); setCompanyInstallationCost(displayCompanyCost); }}
+                        className="font-black text-sm text-foreground hover:underline flex items-center gap-1 leading-none animate-in fade-in duration-200"
+                      >
+                        <span>{displayCompanyCost.toLocaleString('en-US')} د.ل</span>
+                        <Pencil className="h-3 w-3 text-muted-foreground" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {/* Customer Cost */}
-              <div className="bg-blue-500/[0.02] border border-blue-500/10 p-3 rounded-xl flex flex-col justify-between gap-1.5 shadow-sm">
-                <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 leading-none">سعر الزبون</span>
-                <div>
-                  {isCustomerCostEditable ? (
-                    <div className="flex items-center gap-1">
-                      <Input
-                        type="number"
-                        min="0"
-                        value={customerInstallationCost === 0 ? '' : customerInstallationCost}
-                        onChange={(e) => setCustomerInstallationCost(e.target.value === '' ? 0 : Number(e.target.value))}
-                        onBlur={handleCustomerCostBlur}
-                        className="h-7 w-20 text-xs font-bold pl-1 bg-background border-border"
-                        autoFocus
-                      />
-                      <Button size="sm" className="h-7 px-1.5 text-[9px] font-bold" onClick={() => { handleCustomerCostBlur(); setIsCustomerCostEditable(false); }} disabled={savingCost}>
-                        حفظ
-                      </Button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setIsCustomerCostEditable(true)}
-                      className="font-black text-sm text-foreground hover:underline flex items-center gap-1 leading-none animate-in fade-in duration-200"
-                    >
-                      <span>{customerInstallationCost.toLocaleString('en-US')} د.ل</span>
-                      <Pencil className="h-3 w-3 text-muted-foreground" />
-                    </button>
-                  )}
+                {/* Customer Cost - Original/Standard */}
+                <div className="bg-blue-500/[0.02] border border-blue-500/10 p-3 rounded-xl flex flex-col justify-between gap-1.5 shadow-sm">
+                  <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 leading-none">
+                    {isReinstalled ? "سعر الزبون (التركيب الأصلي)" : "سعر الزبون"}
+                  </span>
+                  <div>
+                    {isOriginalCostEditable ? (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          min="0"
+                          value={tempOriginalCost === 0 ? '' : tempOriginalCost}
+                          onChange={(e) => setTempOriginalCost(e.target.value === '' ? 0 : Number(e.target.value))}
+                          className="h-7 w-20 text-xs font-bold pl-1 bg-background border-border"
+                          autoFocus
+                        />
+                        <Button 
+                          size="sm" 
+                          className="h-7 px-1.5 text-[9px] font-bold" 
+                          onClick={async () => { 
+                            await handleCustomerOriginalCostSave(tempOriginalCost); 
+                            setIsOriginalCostEditable(false); 
+                          }} 
+                          disabled={savingCost}
+                        >
+                          حفظ
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setIsOriginalCostEditable(true);
+                          setTempOriginalCost(isReinstalled ? customerOriginalInstallCost : customerInstallationCost);
+                        }}
+                        className="font-black text-sm text-foreground hover:underline flex items-center gap-1 leading-none animate-in fade-in duration-200"
+                      >
+                        <span>
+                          {(isReinstalled ? customerOriginalInstallCost : customerInstallationCost).toLocaleString('en-US')} د.ل
+                        </span>
+                        <Pencil className="h-3 w-3 text-muted-foreground" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            {/* Quick Action: Paid / Settled Costs */}
-            <div className="flex items-center justify-between gap-2 bg-amber-500/[0.03] border border-amber-500/10 p-2.5 rounded-xl shadow-sm transition-all duration-200 hover:bg-amber-500/[0.06]">
-              <div className="flex flex-col text-right">
-                <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400">حالة سداد التكاليف للزبون</span>
-                <span className="text-[9px] text-muted-foreground mt-0.5">تصفير التكاليف للشركة والزبون معاً</span>
-              </div>
-              <Button
-                variant={customerInstallationCost === 0 && companyInstallationCost === 0 ? "default" : "outline"}
-                size="sm"
-                onClick={handleCustomerPaidAllCosts}
-                className={cn(
-                  "h-8 px-3 text-xs font-semibold gap-1.5 rounded-lg transition-all duration-200 cursor-pointer",
-                  customerInstallationCost === 0 && companyInstallationCost === 0
-                    ? "bg-amber-500 hover:bg-amber-600 text-black border-0 shadow-sm"
-                    : "border-amber-500/20 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+                {/* Customer Cost - Reinstall (Only shown if reinstall_count > 0) */}
+                {isReinstalled && (
+                  <div className="bg-amber-500/[0.02] border border-amber-500/10 p-3 rounded-xl flex flex-col justify-between gap-1.5 shadow-sm col-span-2">
+                    <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 leading-none">
+                      سعر الزبون (إعادة التركيب)
+                    </span>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        {isReinstallCostEditable ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="number"
+                              min="0"
+                              value={tempReinstallCost === 0 ? '' : tempReinstallCost}
+                              onChange={(e) => setTempReinstallCost(e.target.value === '' ? 0 : Number(e.target.value))}
+                              className="h-7 w-20 text-xs font-bold pl-1 bg-background border-border"
+                              autoFocus
+                            />
+                            <Button 
+                              size="sm" 
+                              className="h-7 px-1.5 text-[9px] font-bold" 
+                              onClick={async () => { 
+                                await handleCustomerReinstallCostSave(tempReinstallCost); 
+                                setIsReinstallCostEditable(false); 
+                              }} 
+                              disabled={savingCost}
+                            >
+                              حفظ
+                            </Button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setIsReinstallCostEditable(true);
+                              setTempReinstallCost(customerReinstallCost || customerInstallationCost);
+                            }}
+                            className="font-black text-sm text-foreground hover:underline flex items-center gap-1 leading-none animate-in fade-in duration-200"
+                          >
+                            <span>
+                              {(customerReinstallCost || customerInstallationCost).toLocaleString('en-US')} د.ل
+                            </span>
+                            <Pencil className="h-3 w-3 text-muted-foreground" />
+                          </button>
+                        )}
+                      </div>
+                      <Badge variant="outline" className="text-[9px] bg-amber-500/10 border-amber-300 text-amber-700">
+                        إعادة تركيب ({item.reinstall_count} مرة)
+                      </Badge>
+                    </div>
+                  </div>
                 )}
-                disabled={savingCost || savingCompanyCost}
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                <span>{customerInstallationCost === 0 && companyInstallationCost === 0 ? "تم السداد والتصفير" : "سدد التكاليف / بدون تكاليف"}</span>
-              </Button>
-            </div>
-
-            {/* Profit margin bar */}
-            {customerInstallationCost > 0 && displayCompanyCost > 0 && (
-              <div className={cn(
-                "text-[11px] font-bold py-2 px-3 rounded-xl flex items-center justify-between border",
-                (customerInstallationCost - displayCompanyCost) >= 0
-                  ? "bg-emerald-500/[0.02] border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                  : "bg-rose-500/[0.02] border-rose-500/20 text-rose-600 dark:text-rose-400"
-              )}>
-                <span>هامش الربح التقديري:</span>
-                <div className="flex items-center gap-1.5 font-black text-xs">
-                  {(customerInstallationCost - displayCompanyCost) >= 0 ? (
-                    <TrendingUp className="h-3.5 w-3.5" />
-                  ) : (
-                    <TrendingDown className="h-3.5 w-3.5" />
-                  )}
-                  <span>{(customerInstallationCost - displayCompanyCost).toLocaleString('en-US')} د.ل</span>
-                </div>
               </div>
-            )}
 
-            {/* Repeat installation warning */}
+              {/* Quick Action: Paid / Settled Costs */}
+              <div className="flex items-center justify-between gap-2 bg-amber-500/[0.03] border border-amber-500/10 p-2.5 rounded-xl shadow-sm transition-all duration-200 hover:bg-amber-500/[0.06]">
+                <div className="flex flex-col text-right">
+                  <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400">حالة سداد التكاليف للزبون</span>
+                  <span className="text-[9px] text-muted-foreground mt-0.5">تصفير التكاليف للشركة والزبون معاً</span>
+                </div>
+                <Button
+                  variant={totalCustomerCost === 0 && companyInstallationCost === 0 ? "default" : "outline"}
+                  size="sm"
+                  onClick={handleCustomerPaidAllCosts}
+                  className={cn(
+                    "h-8 px-3 text-xs font-semibold gap-1.5 rounded-lg transition-all duration-200 cursor-pointer",
+                    totalCustomerCost === 0 && companyInstallationCost === 0
+                      ? "bg-amber-500 hover:bg-amber-600 text-black border-0 shadow-sm"
+                      : "border-amber-500/20 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+                  )}
+                  disabled={savingCost || savingCompanyCost}
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>{totalCustomerCost === 0 && companyInstallationCost === 0 ? "تم السداد والتصفير" : "سدد التكاليف / بدون تكاليف"}</span>
+                </Button>
+              </div>
+
+              {/* Profit margin bar */}
+              {totalCustomerCost > 0 && displayCompanyCost > 0 && (
+                <div className={cn(
+                  "text-[11px] font-bold py-2 px-3 rounded-xl flex items-center justify-between border",
+                  (totalCustomerCost - displayCompanyCost) >= 0
+                    ? "bg-emerald-500/[0.02] border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                    : "bg-rose-500/[0.02] border-rose-500/20 text-rose-600 dark:text-rose-400"
+                )}>
+                  <span>هامش الربح التقديري:</span>
+                  <div className="flex items-center gap-1.5 font-black text-xs">
+                    {(totalCustomerCost - displayCompanyCost) >= 0 ? (
+                      <TrendingUp className="h-3.5 w-3.5" />
+                    ) : (
+                      <TrendingDown className="h-3.5 w-3.5" />
+                    )}
+                    <span>{(totalCustomerCost - displayCompanyCost).toLocaleString('en-US')} د.ل</span>
+                  </div>
+                </div>
+              )}
             {(item.replacement_status === 'reinstalled' || item.reinstall_count > 0) && customerInstallationCost === 0 && item.replacement_cost_bearer !== 'company' && (
               <div className="p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-[10px] text-destructive space-y-1.5">
                 <div className="flex items-center gap-1.5 font-bold">
@@ -657,6 +922,7 @@ export function BillboardTaskCard({
       </AnimatePresence>
     </div>
   );
+};
 
   // Completed State rendering override
   if (isCompleted) {
@@ -843,7 +1109,7 @@ export function BillboardTaskCard({
                 className="h-8 flex-1 rounded-xl text-[10px] font-bold gap-1 hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 border-amber-500/20"
               >
                 <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
-                <span>استبدال</span>
+                <span>إعادة تركيب</span>
               </Button>
               
               {/* More / Dropdown (like uncomplete, extend rental, etc.) */}
@@ -1208,7 +1474,7 @@ export function BillboardTaskCard({
                     className="h-8 flex-1 rounded-xl text-[10px] font-bold gap-1 hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 border-amber-500/20"
                   >
                     <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
-                    <span>استبدال</span>
+                    <span>إعادة تركيب</span>
                   </Button>
                 )}
 
@@ -1304,44 +1570,44 @@ export function BillboardTaskCard({
               )}
 
               {/* Actions row for replacements */}
-              <div className="flex items-center gap-1.5 pt-2 border-t border-border/20 mt-1">
-                <button
+              <div className="flex items-center justify-between gap-1.5 pt-2 border-t border-border/20 mt-1">
+                <Button
+                  variant="ghost"
+                  size="xs"
                   onClick={(e) => { e.stopPropagation(); setEditReplacementOpen(true); }}
-                  className="p-1.5 rounded-lg hover:bg-muted text-foreground/80 transition-colors"
-                  title="تعديل بيانات الاستبدال"
+                  className="h-7 text-[10px] gap-1 hover:bg-muted text-foreground/80 transition-colors"
                 >
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    if (!await systemConfirm({ title: 'إلغاء حالة الاستبدال', message: 'هل تريد إزالة علامة الاستبدال من هذه اللوحة؟', confirmText: 'إلغاء الاستبدال' })) return;
-                    try {
-                      if (item.replaced_by_item_id) {
-                        await supabase.from('installation_task_items').update({
-                          replacement_status: null, replaces_item_id: null, replacement_reason: null,
-                          replacement_cost_bearer: null, replacement_cost_percentage: null,
-                        } as any).eq('id', item.replaced_by_item_id);
-                      }
-                      if (item.replaces_item_id) {
-                        await supabase.from('installation_task_items').update({
-                          replacement_status: null, replaced_by_item_id: null, replacement_reason: null,
-                          replacement_cost_bearer: null, replacement_cost_percentage: null,
-                        } as any).eq('id', item.replaces_item_id);
-                      }
-                      await supabase.from('installation_task_items').update({
-                        replacement_status: null, replaced_by_item_id: null, replaces_item_id: null,
-                        replacement_reason: null, replacement_cost_bearer: null, replacement_cost_percentage: null,
-                      } as any).eq('id', item.id);
-                      toast.success('تم إلغاء حالة الاستبدال');
-                      onRefresh?.();
-                    } catch { toast.error('حدث خطأ'); }
-                  }}
-                  className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive transition-colors"
-                  title="إلغاء حالة الاستبدال"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                  <Pencil className="h-3 w-3" />
+                  <span>تعديل البيانات</span>
+                </Button>
+                
+                {item.replacement_status === 'reinstalled' ? (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await handleUndoReinstall();
+                    }}
+                    className="h-7 text-[10px] gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    <span>تراجع عن إعادة التركيب</span>
+                  </Button>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await handleUndoReplacement();
+                    }}
+                    className="h-7 text-[10px] gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    <span>تراجع عن الاستبدال</span>
+                  </Button>
+                )}
               </div>
             </div>
           )}

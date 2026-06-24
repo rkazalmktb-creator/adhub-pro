@@ -259,6 +259,8 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
     additionalNotes: string; companyAdditionalCost: number; companyAdditionalNotes: string;
     hasCutout: boolean;
     hasPrint: boolean;
+    customerOriginalInstallCost: number;
+    customerReinstallCost: number;
   }>({ 
     companyCost: 0, 
     customerCost: 0, 
@@ -267,7 +269,9 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
     companyAdditionalCost: 0, 
     companyAdditionalNotes: '', 
     hasCutout: false,
-    hasPrint: false
+    hasPrint: false,
+    customerOriginalInstallCost: 0,
+    customerReinstallCost: 0
   });
   
   const [customCompanyCosts, setCustomCompanyCosts] = useState<Record<string, number>>({});
@@ -549,7 +553,10 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
       const itemArea = area * faces;
       const itemCompanyCost = customCompanyCosts[item.id] ?? installationPrices[item.billboard_id] ?? 0;
       const itemCompanyAdditional = item.company_additional_cost || 0;
-      const itemCustomerCost = item.customer_installation_cost || 0;
+      const isReinstalled = (item.reinstall_count || 0) > 0;
+      const itemCustomerCost = isReinstalled
+        ? (item.customer_original_install_cost || 0) + (item.customer_reinstall_cost || item.customer_installation_cost || 0)
+        : (item.customer_installation_cost || 0);
 
       companyCost += itemCompanyCost + itemCompanyAdditional;
       customerCost += itemCustomerCost;
@@ -638,7 +645,10 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
     setEditingItemId(item.id);
     const existingCompanyCost = customCompanyCosts[item.id] ?? installationPrices[item.billboard_id] ?? 0;
     setEditValues({
-      companyCost: existingCompanyCost, customerCost: item.customer_installation_cost || 0,
+      companyCost: existingCompanyCost, 
+      customerCost: item.customer_installation_cost || 0,
+      customerOriginalInstallCost: item.customer_original_install_cost || 0,
+      customerReinstallCost: item.customer_reinstall_cost || 0,
       additionalCost: item.additional_cost || 0, additionalNotes: item.additional_cost_notes || '',
       companyAdditionalCost: item.company_additional_cost || 0, companyAdditionalNotes: item.company_additional_cost_notes || '',
       hasCutout: !!item.has_cutout,
@@ -678,9 +688,13 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
       const editingItem = taskItems.find(item => item.id === editingItemId);
       if (!editingItem) throw new Error('Item not found');
 
+      const isReinstalled = (editingItem.reinstall_count || 0) > 0;
       setCustomCompanyCosts(prev => ({ ...prev, [editingItemId]: editValues.companyCost }));
       const { error } = await supabase.from('installation_task_items').update({
-        customer_installation_cost: editValues.customerCost, company_installation_cost: editValues.companyCost,
+        customer_installation_cost: isReinstalled ? editValues.customerReinstallCost : editValues.customerCost,
+        customer_original_install_cost: editValues.customerOriginalInstallCost,
+        customer_reinstall_cost: editValues.customerReinstallCost,
+        company_installation_cost: editValues.companyCost,
         additional_cost: editValues.additionalCost || null, additional_cost_notes: editValues.additionalNotes || null,
         company_additional_cost: editValues.companyAdditionalCost || null, company_additional_cost_notes: editValues.companyAdditionalNotes || null,
         has_cutout: editValues.hasCutout
@@ -738,10 +752,16 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
       }
       
       const newItems = taskItems.map(item => 
-        item.id === editingItemId ? { ...item, customer_installation_cost: editValues.customerCost, company_installation_cost: editValues.companyCost,
+        item.id === editingItemId ? { 
+          ...item, 
+          customer_installation_cost: isReinstalled ? editValues.customerReinstallCost : editValues.customerCost,
+          customer_original_install_cost: editValues.customerOriginalInstallCost,
+          customer_reinstall_cost: editValues.customerReinstallCost,
+          company_installation_cost: editValues.companyCost,
           additional_cost: editValues.additionalCost, additional_cost_notes: editValues.additionalNotes,
           company_additional_cost: editValues.companyAdditionalCost, company_additional_cost_notes: editValues.companyAdditionalNotes,
-          has_cutout: editValues.hasCutout } : item
+          has_cutout: editValues.hasCutout 
+        } : item
       );
       setTaskItems(newItems);
       
@@ -749,7 +769,11 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
       newItems.forEach(item => {
         const companyPrice = item.id === editingItemId ? editValues.companyCost : (customCompanyCosts[item.id] ?? installationPrices[item.billboard_id] ?? 0);
         const companyExtra = item.id === editingItemId ? editValues.companyAdditionalCost : (item.company_additional_cost || 0);
-        newCustomerTotal += item.customer_installation_cost || 0;
+        const isItemReinstalled = (item.reinstall_count || 0) > 0;
+        const itemCustCost = isItemReinstalled
+          ? (item.customer_original_install_cost || 0) + (item.customer_reinstall_cost || item.customer_installation_cost || 0)
+          : (item.customer_installation_cost || 0);
+        newCustomerTotal += itemCustCost;
         newCompanyTotal += companyPrice + companyExtra;
       });
       await updateCompositeTaskInstallationCosts(newCustomerTotal, newCompanyTotal);
@@ -1050,6 +1074,9 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
 
   if (!task) return null;
 
+  // تحديد ما إذا كانت هذه التركيبة الأولى (لا يمكن تعديل تكلفة التركيب للعميل)
+  const isFirstInstallation = task.task_type === 'new_installation';
+
   const billboardTypes = Object.keys(groupedData);
   const cutoutItemCount = taskItems.filter(i => i.has_cutout).length || cutoutItems.length;
 
@@ -1159,6 +1186,20 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                 <TabsContent value="installation" className="mt-0 p-5 sm:p-6 space-y-6">
                   {task.installation_task_id ? (
                     <>
+                      {/* تنبيه: التركيبة الأولى لا يمكن تعديل تكلفتها للعميل */}
+                      {isFirstInstallation && (
+                        <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-500/8 border border-blue-500/20 text-blue-800 dark:text-blue-300 mb-2">
+                          <div className="p-2 rounded-lg bg-blue-500/15 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5">
+                            <AlertCircle className="h-5 w-5" />
+                          </div>
+                          <div className="space-y-1">
+                            <h5 className="font-bold text-sm">تركيبة أولى - تكلفة التركيب غير قابلة للتعديل</h5>
+                            <p className="text-xs leading-relaxed text-blue-700/85 dark:text-blue-400/85">
+                              هذه مهمة تركيب أولى (جديدة). تكلفة التركيب على العميل مقفلة ولا يمكن تعديلها. يمكنك فقط تعديل تكلفة الشركة والتكاليف الإضافية.
+                            </p>
+                          </div>
+                        </div>
+                      )}
                       {/* Segmented pricing-mode control + Set free */}
                       <div className="flex items-center justify-between gap-3 flex-wrap text-right">
                         <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-muted/40 border border-border/15 shadow-inner">
@@ -1189,8 +1230,9 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                           size="sm"
                           variant="ghost"
                           onClick={handleSetAllFree}
-                          disabled={distributing || totals.customerCost === 0}
+                          disabled={distributing || totals.customerCost === 0 || isFirstInstallation}
                           className="gap-1.5 text-xs h-8 text-rose-600 hover:bg-rose-500/10 hover:text-rose-700 rounded-lg px-3"
+                          title={isFirstInstallation ? 'غير متاح للتركيبة الأولى' : ''}
                         >
                           <Gift className="h-3.5 w-3.5" />
                           <span>جعل الكل مجاني</span>
@@ -1501,21 +1543,29 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                                                         />
                                                       </div>
                                                       <div className="space-y-2">
-                                                        <Label className="text-sm font-semibold text-primary block leading-relaxed text-right">سعر الزبون (التركيب الأساسي)</Label>
+                                                        <Label className={cn("text-sm font-semibold block leading-relaxed text-right", isFirstInstallation ? 'text-muted-foreground' : 'text-primary')}>سعر الزبون (التركيب الأساسي){isFirstInstallation && <span className="text-[10px] text-blue-500 mr-1">(مقفل)</span>}</Label>
                                                         <div className="flex gap-2 items-center">
-                                                          <InlinePriceInput 
-                                                            value={editValues.customerCost}
-                                                            onChange={val => setEditValues(prev => ({...prev, customerCost: val}))}
-                                                            label=""
-                                                            showLabel={false}
-                                                            className="flex-1"
-                                                          />
+                                                          {isFirstInstallation ? (
+                                                            <div className="flex-1 flex items-center gap-1.5 bg-muted/40 rounded-xl px-4 h-11 border border-border/15 opacity-60 cursor-not-allowed">
+                                                              <span className="text-base font-bold font-mono text-foreground/60">{editValues.customerCost.toLocaleString('ar-LY')}</span>
+                                                              <span className="text-xs text-muted-foreground/50 mr-1">د.ل</span>
+                                                            </div>
+                                                          ) : (
+                                                            <InlinePriceInput 
+                                                              value={editValues.customerCost}
+                                                              onChange={val => setEditValues(prev => ({...prev, customerCost: val}))}
+                                                              label=""
+                                                              showLabel={false}
+                                                              className="flex-1"
+                                                            />
+                                                          )}
                                                           <Button 
                                                             size="sm" 
                                                             variant="outline" 
                                                             className="h-11 w-11 p-0 shrink-0 rounded-xl text-purple-600 border-purple-250 hover:bg-purple-50/50 transition-colors" 
                                                             onClick={() => setEditValues(prev => ({ ...prev, customerCost: 0 }))} 
                                                             title="مجاني"
+                                                            disabled={isFirstInstallation}
                                                           >
                                                             <Gift className="h-5 w-5" />
                                                           </Button>
@@ -1562,6 +1612,7 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                                                                : "border-amber-500/20 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
                                                            )}
                                                            onClick={() => setEditValues(prev => ({ ...prev, customerCost: 0, companyCost: 0 }))}
+                                                           disabled={isFirstInstallation}
                                                            type="button"
                                                          >
                                                            <CheckCircle2 className="h-4 w-4" />

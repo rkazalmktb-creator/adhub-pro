@@ -35,6 +35,10 @@ interface TaskItem {
   pricing_type?: 'piece' | 'meter';
   price_per_meter?: number;
   faces_to_install?: number;
+  reinstall_count?: number | null;
+  customer_original_install_cost?: number | null;
+  customer_reinstall_cost?: number | null;
+  replacement_status?: string | null;
 }
 
 interface Billboard {
@@ -48,15 +52,16 @@ interface Billboard {
 }
 
 // ════════════ Reusable Inline Price Input with Controls ════════════
-const InlinePriceInput = ({ value, onChange, label, step = 1, showLabel = true, className }: {
+const InlinePriceInput = ({ value, onChange, label, step = 1, showLabel = true, className, disabled }: {
   value: number;
   onChange: (val: number) => void;
   label: string;
   step?: number;
   showLabel?: boolean;
   className?: string;
+  disabled?: boolean;
 }) => (
-  <div dir="rtl" className={cn("flex items-center justify-start gap-3 bg-background border border-border/15 rounded-xl p-1.5 shadow-sm shrink-0 min-w-0 transition-all focus-within:border-primary/30 text-right", className)}>
+  <div dir="rtl" className={cn("flex items-center justify-start gap-3 bg-background border border-border/15 rounded-xl p-1.5 shadow-sm shrink-0 min-w-0 transition-all focus-within:border-primary/30 text-right", disabled && "opacity-60 bg-muted/30 pointer-events-none", className)}>
     {showLabel && <span className="text-sm font-semibold text-muted-foreground/80 px-2 shrink-0 text-right whitespace-nowrap">{label}</span>}
     <Button
       type="button"
@@ -65,6 +70,7 @@ const InlinePriceInput = ({ value, onChange, label, step = 1, showLabel = true, 
       className="h-9 w-9 hover:bg-muted text-lg font-bold shrink-0 p-0 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
       onClick={() => onChange(value + step)}
       aria-label="زيادة"
+      disabled={disabled}
     >
       +
     </Button>
@@ -75,6 +81,8 @@ const InlinePriceInput = ({ value, onChange, label, step = 1, showLabel = true, 
         value={value}
         onChange={e => onChange(Number(e.target.value) || 0)}
         className="h-9 flex-1 min-w-0 text-center border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 font-bold font-mono text-base text-foreground px-1"
+        disabled={disabled}
+        readOnly={disabled}
       />
       <span className="text-xs font-semibold text-muted-foreground/70 pointer-events-none shrink-0 px-1 whitespace-nowrap">د.ل</span>
     </div>
@@ -85,6 +93,7 @@ const InlinePriceInput = ({ value, onChange, label, step = 1, showLabel = true, 
       className="h-9 w-9 hover:bg-muted text-lg font-bold shrink-0 p-0 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
       onClick={() => onChange(Math.max(0, value - step))}
       aria-label="نقصان"
+      disabled={disabled}
     >
       -
     </Button>
@@ -97,6 +106,7 @@ interface TaskTotalCostSummaryProps {
   installationPrices: Record<number, number>;
   billboards?: Record<number, Billboard>;
   onRefresh: () => void;
+  taskType?: 'installation' | 'reinstallation';
 }
 
 const BILLBOARD_TYPE_ICONS: Record<string, any> = {
@@ -127,7 +137,8 @@ export function TaskTotalCostSummary({
   taskItems, 
   installationPrices,
   billboards = {},
-  onRefresh 
+  onRefresh,
+  taskType
 }: TaskTotalCostSummaryProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [sizesMap, setSizesMap] = useState<Record<string, SizeData>>({});
@@ -147,6 +158,8 @@ export function TaskTotalCostSummary({
   const [editValues, setEditValues] = useState<{
     companyCost: number;
     customerCost: number;
+    customerOriginalInstallCost: number;
+    customerReinstallCost: number;
     additionalCost: number;
     additionalNotes: string;
     companyAdditionalCost: number;
@@ -155,6 +168,8 @@ export function TaskTotalCostSummary({
   }>({
     companyCost: 0,
     customerCost: 0,
+    customerOriginalInstallCost: 0,
+    customerReinstallCost: 0,
     additionalCost: 0,
     additionalNotes: '',
     companyAdditionalCost: 0,
@@ -264,7 +279,10 @@ export function TaskTotalCostSummary({
               ? fullCompanyCost / 2
               : fullCompanyCost;
           })();
-      const itemCustomerCost = item.customer_installation_cost || 0;
+      const isReinstalled = (item.reinstall_count || 0) > 0;
+      const itemCustomerCost = isReinstalled
+        ? (item.customer_original_install_cost || 0) + (item.customer_reinstall_cost || item.customer_installation_cost || 0)
+        : (item.customer_installation_cost || 0);
 
       companyCost += itemCompanyCost;
       customerCost += itemCustomerCost;
@@ -356,6 +374,8 @@ export function TaskTotalCostSummary({
     setEditValues({
       companyCost: existingCompanyCost,
       customerCost: item.customer_installation_cost || 0,
+      customerOriginalInstallCost: item.customer_original_install_cost || 0,
+      customerReinstallCost: item.customer_reinstall_cost || 0,
       additionalCost: item.additional_cost || 0,
       additionalNotes: item.additional_cost_notes || '',
       companyAdditionalCost: item.company_additional_cost || 0,
@@ -376,17 +396,24 @@ export function TaskTotalCostSummary({
         [editingItemId]: editValues.companyCost
       }));
       
+      const editingItem = taskItems.find(i => i.id === editingItemId);
+      const isReinstalled = editingItem && (editingItem.reinstall_count || 0) > 0;
+
+      const updateData: any = {
+        company_installation_cost: editValues.companyCost,
+        customer_installation_cost: isReinstalled ? editValues.customerReinstallCost : editValues.customerCost,
+        customer_original_install_cost: editValues.customerOriginalInstallCost,
+        customer_reinstall_cost: editValues.customerReinstallCost,
+        additional_cost: editValues.additionalCost || null,
+        additional_cost_notes: editValues.additionalNotes || null,
+        company_additional_cost: editValues.companyAdditionalCost || null,
+        company_additional_cost_notes: editValues.companyAdditionalNotes || null,
+        has_cutout: editValues.hasCutout
+      };
+      
       const { error } = await supabase
         .from('installation_task_items')
-        .update({
-          company_installation_cost: editValues.companyCost,
-          customer_installation_cost: editValues.customerCost,
-          additional_cost: editValues.additionalCost || null,
-          additional_cost_notes: editValues.additionalNotes || null,
-          company_additional_cost: editValues.companyAdditionalCost || null,
-          company_additional_cost_notes: editValues.companyAdditionalNotes || null,
-          has_cutout: editValues.hasCutout
-        })
+        .update(updateData)
         .eq('id', editingItemId);
 
       if (error) throw error;
@@ -1093,89 +1120,136 @@ export function TaskTotalCostSummary({
                                             </div>
                                             
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 text-right">
-                                              <div className="space-y-2">
-                                                <Label className="text-sm font-semibold text-amber-600 block leading-relaxed text-right">تكلفة الشركة (التركيب الأساسي)</Label>
-                                                <InlinePriceInput 
-                                                  value={editValues.companyCost}
-                                                  onChange={val => setEditValues(prev => ({...prev, companyCost: val}))}
-                                                  label=""
-                                                  showLabel={false}
-                                                  className="w-full"
-                                                />
-                                              </div>
-                                              <div className="space-y-2">
-                                                <Label className="text-sm font-semibold text-primary block leading-relaxed text-right">سعر الزبون (التركيب الأساسي)</Label>
-                                                <div className="flex gap-2 items-center">
-                                                  <InlinePriceInput 
-                                                    value={editValues.customerCost}
-                                                    onChange={val => setEditValues(prev => ({...prev, customerCost: val}))}
-                                                    label=""
-                                                    showLabel={false}
-                                                    className="flex-1"
-                                                  />
-                                                  <Button 
-                                                    size="sm" 
-                                                    variant="outline" 
-                                                    className="h-11 w-11 p-0 shrink-0 rounded-xl text-purple-650 border-purple-250 hover:bg-purple-50/50 transition-colors" 
-                                                    onClick={() => setEditValues(prev => ({ ...prev, customerCost: 0 }))} 
-                                                    title="مجاني"
-                                                  >
-                                                    <Gift className="h-5 w-5" />
-                                                  </Button>
-                                                </div>
-                                              </div>
-                                              
-                                              <div className="space-y-2">
-                                                <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed text-right">مصاريف إضافية على الشركة</Label>
-                                                <InlinePriceInput 
-                                                  value={editValues.companyAdditionalCost}
-                                                  onChange={val => setEditValues(prev => ({...prev, companyAdditionalCost: val}))}
-                                                  label=""
-                                                  showLabel={false}
-                                                  className="w-full"
-                                                />
-                                              </div>
-                                              <div className="space-y-2">
-                                                <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed text-right">مصاريف إضافية على العميل</Label>
-                                                <InlinePriceInput 
-                                                  value={editValues.additionalCost}
-                                                  onChange={val => setEditValues(prev => ({...prev, additionalCost: val}))}
-                                                  label=""
-                                                  showLabel={false}
-                                                  className="w-full"
-                                                />
-                                              </div>
-                                              <div className="space-y-2">
-                                                <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed text-right">ملاحظات وسبب إضافية العميل</Label>
-                                                <Input dir="rtl" value={editValues.additionalNotes} onChange={e => setEditValues(prev => ({...prev, additionalNotes: e.target.value}))} placeholder="تجهيزات معينة للموقع، عمل ليلي..." className="h-11 text-xs rounded-xl text-right" />
-                                              </div>
-                                              <div className="space-y-2">
-                                                <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed text-right">ملاحظات وسبب إضافية الشركة</Label>
-                                                <Input dir="rtl" value={editValues.companyAdditionalNotes} onChange={e => setEditValues(prev => ({...prev, companyAdditionalNotes: e.target.value}))} placeholder="تراخيص، رافعة تلسكوبية..." className="h-11 text-xs rounded-xl text-right" />
-                                              </div>
+                                              {/* isFirstInstall calculation defined here */}
+                                              {(() => {
+                                                const isFirstInstall = taskType !== 'reinstallation';
+                                                const isReinstalled = (item.reinstall_count || 0) > 0;
+                                                return (
+                                                  <>
+                                                    <div className="space-y-2">
+                                                      <Label className="text-sm font-semibold text-amber-600 block leading-relaxed text-right">تكلفة الشركة (التركيب الأساسي)</Label>
+                                                      <InlinePriceInput 
+                                                        value={editValues.companyCost}
+                                                        onChange={val => setEditValues(prev => ({...prev, companyCost: val}))}
+                                                        label=""
+                                                        showLabel={false}
+                                                        className="w-full"
+                                                        disabled={isFirstInstall && !isReinstalled}
+                                                      />
+                                                    </div>
 
-                                              {/* تصفير / سداد التكاليف */}
-                                              <div className="col-span-1 sm:col-span-2 flex items-center justify-between gap-3 bg-amber-500/[0.03] border border-amber-500/10 p-3 rounded-xl shadow-sm mt-1 text-right">
-                                                <div className="flex flex-col text-right">
-                                                  <span className="text-xs font-bold text-amber-700 dark:text-amber-400">حالة سداد التكاليف للزبون</span>
-                                                  <span className="text-[10px] text-muted-foreground mt-0.5">تصفير التكاليف للشركة وللزبون (بدون تكاليف)</span>
-                                                </div>
-                                                <Button
-                                                  size="sm"
-                                                  variant={editValues.customerCost === 0 && editValues.companyCost === 0 ? "default" : "outline"}
-                                                  className={cn(
-                                                    "h-9 px-4 text-xs font-bold gap-2 rounded-xl transition-all cursor-pointer",
-                                                    editValues.customerCost === 0 && editValues.companyCost === 0
-                                                      ? "bg-amber-500 hover:bg-amber-600 text-black border-0 shadow-sm animate-pulse"
-                                                      : "border-amber-500/20 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
-                                                  )}
-                                                  onClick={() => setEditValues(prev => ({ ...prev, customerCost: 0, companyCost: 0 }))}
-                                                  type="button"
-                                                >
-                                                  <CheckCircle2 className="h-4 w-4" />
-                                                  <span>{editValues.customerCost === 0 && editValues.companyCost === 0 ? "تم السداد والتصفير" : "سدد التكاليف / بدون تكاليف"}</span>
-                                                </Button>
-                                              </div>
+                                                    {!isReinstalled ? (
+                                                      <div className="space-y-2">
+                                                        <Label className="text-sm font-semibold text-primary block leading-relaxed text-right">سعر الزبون (التركيب الأساسي)</Label>
+                                                        <div className="flex gap-2 items-center">
+                                                          <InlinePriceInput 
+                                                            value={editValues.customerCost}
+                                                            onChange={val => setEditValues(prev => ({...prev, customerCost: val}))}
+                                                            label=""
+                                                            showLabel={false}
+                                                            className="flex-1"
+                                                            disabled={isFirstInstall}
+                                                          />
+                                                          <Button 
+                                                            type="button"
+                                                            size="sm" 
+                                                            variant="outline" 
+                                                            className="h-11 w-11 p-0 shrink-0 rounded-xl text-purple-650 border-purple-250 hover:bg-purple-50/50 transition-colors" 
+                                                            onClick={() => setEditValues(prev => ({ ...prev, customerCost: 0 }))} 
+                                                            title="مجاني"
+                                                            disabled={isFirstInstall}
+                                                          >
+                                                            <Gift className="h-5 w-5" />
+                                                          </Button>
+                                                        </div>
+                                                      </div>
+                                                    ) : (
+                                                      <>
+                                                        <div className="space-y-2">
+                                                          <Label className="text-sm font-semibold text-primary block leading-relaxed text-right">سعر الزبون (التركيب الأصلي)</Label>
+                                                          <InlinePriceInput 
+                                                            value={editValues.customerOriginalInstallCost}
+                                                            onChange={val => setEditValues(prev => ({...prev, customerOriginalInstallCost: val}))}
+                                                            label=""
+                                                            showLabel={false}
+                                                            className="w-full"
+                                                          />
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                          <Label className="text-sm font-semibold text-amber-600 block leading-relaxed text-right">سعر الزبون (إعادة التركيب)</Label>
+                                                          <InlinePriceInput 
+                                                            value={editValues.customerReinstallCost}
+                                                            onChange={val => setEditValues(prev => ({...prev, customerReinstallCost: val}))}
+                                                            label=""
+                                                            showLabel={false}
+                                                            className="w-full"
+                                                          />
+                                                        </div>
+                                                      </>
+                                                    )}
+                                                    
+                                                    {isFirstInstall && !isReinstalled && (
+                                                      <div className="col-span-1 sm:col-span-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs font-bold text-right flex items-center gap-2">
+                                                        <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                                                        <span>تكلفة التركيبة الأولى تأتي تلقائياً من العقد ولا يمكن تعديلها من هنا.</span>
+                                                      </div>
+                                                    )}
+
+                                                    <div className="space-y-2">
+                                                      <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed text-right">مصاريف إضافية على الشركة</Label>
+                                                      <InlinePriceInput 
+                                                        value={editValues.companyAdditionalCost}
+                                                        onChange={val => setEditValues(prev => ({...prev, companyAdditionalCost: val}))}
+                                                        label=""
+                                                        showLabel={false}
+                                                        className="w-full"
+                                                      />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                      <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed text-right">مصاريف إضافية على العميل</Label>
+                                                      <InlinePriceInput 
+                                                        value={editValues.additionalCost}
+                                                        onChange={val => setEditValues(prev => ({...prev, additionalCost: val}))}
+                                                        label=""
+                                                        showLabel={false}
+                                                        className="w-full"
+                                                      />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                      <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed text-right">ملاحظات وسبب إضافية العميل</Label>
+                                                      <Input dir="rtl" value={editValues.additionalNotes} onChange={e => setEditValues(prev => ({...prev, additionalNotes: e.target.value}))} placeholder="تجهيزات معينة للموقع، عمل ليلي..." className="h-11 text-xs rounded-xl text-right" />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                      <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed text-right">ملاحظات وسبب إضافية الشركة</Label>
+                                                      <Input dir="rtl" value={editValues.companyAdditionalNotes} onChange={e => setEditValues(prev => ({...prev, companyAdditionalNotes: e.target.value}))} placeholder="تراخيص، رافعة تلسكوبية..." className="h-11 text-xs rounded-xl text-right" />
+                                                    </div>
+
+                                                    {/* تصفير / سداد التكاليف */}
+                                                    <div className="col-span-1 sm:col-span-2 flex items-center justify-between gap-3 bg-amber-500/[0.03] border border-amber-500/10 p-3 rounded-xl shadow-sm mt-1 text-right">
+                                                      <div className="flex flex-col text-right">
+                                                        <span className="text-xs font-bold text-amber-700 dark:text-amber-400">حالة سداد التكاليف للزبون</span>
+                                                        <span className="text-[10px] text-muted-foreground mt-0.5">تصفير التكاليف للشركة وللزبون (بدون تكاليف)</span>
+                                                      </div>
+                                                      <Button
+                                                        size="sm"
+                                                        variant={editValues.customerCost === 0 && editValues.companyCost === 0 ? "default" : "outline"}
+                                                        className={cn(
+                                                          "h-9 px-4 text-xs font-bold gap-2 rounded-xl transition-all cursor-pointer",
+                                                          editValues.customerCost === 0 && editValues.companyCost === 0
+                                                            ? "bg-amber-500 hover:bg-amber-600 text-black border-0 shadow-sm"
+                                                            : "border-amber-500/20 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+                                                        )}
+                                                        onClick={() => setEditValues(prev => ({ ...prev, customerCost: 0, companyCost: 0 }))}
+                                                        type="button"
+                                                        disabled={isFirstInstall}
+                                                      >
+                                                        <CheckCircle2 className="h-4 w-4" />
+                                                        <span>{editValues.customerCost === 0 && editValues.companyCost === 0 ? "تم السداد والتصفير" : "سدد التكاليف / بدون تكاليف"}</span>
+                                                      </Button>
+                                                    </div>
+                                                  </>
+                                                );
+                                              })()}
 
                                               <div className="space-y-2 col-span-2 border-t border-border/10 pt-4 mt-2">
                                                 <Label className="text-sm font-semibold text-purple-650 block leading-relaxed">هل تحتوي هذه اللوحة على مجسم؟</Label>
@@ -1229,7 +1303,16 @@ export function TaskTotalCostSummary({
                                                      )}
                                                   </Badge>
                                                 ) : null}
-                                                {item.customer_installation_cost === 0 ? (
+                                                {((item.reinstall_count || 0) > 0) ? (
+                                                  <>
+                                                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:border-blue-700">
+                                                      الزبون (أصلي): {(item.customer_original_install_cost || 0).toLocaleString('ar-LY')}
+                                                    </Badge>
+                                                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-700">
+                                                      الزبون (إعادة): {(item.customer_reinstall_cost || item.customer_installation_cost || 0).toLocaleString('ar-LY')}
+                                                    </Badge>
+                                                  </>
+                                                ) : item.customer_installation_cost === 0 ? (
                                                   <Badge className="bg-purple-100 text-purple-755 border-none dark:bg-purple-950/50 dark:text-purple-300">
                                                     <Gift className="h-3 w-3 ml-1" />
                                                     مجاني

@@ -1056,10 +1056,13 @@ export function UnifiedTaskInvoice({
               const billboardId = item.billboard?.ID || item.billboard_id;
               const isPrinted = allPrintIds.length === 0 || printedBillboardIds.has(Number(billboardId));
 
-              // اعتبار العنصر "مجاني" إذا كانت كل تكاليفه على الزبون صفر
               const linkedTask = _taskByInstallIdEarly.get(item.task_id);
-              const itemCustomerInstall = Number(item.customer_installation_cost) || 0;
-              const itemCustomerReinstall = Number(item.customer_reinstall_cost) || 0;
+              const itemCustomerInstall = isReinstalled
+                ? (Number(item.customer_original_install_cost) || 0)
+                : (Number(item.customer_installation_cost) || 0);
+              const itemCustomerReinstall = isReinstalled
+                ? (Number(item.customer_reinstall_cost) || 0)
+                : 0;
               const taskCustomerPrint = Number(linkedTask?.customer_print_cost) || 0;
               const isFreeItem = itemCustomerInstall === 0 && itemCustomerReinstall === 0 && taskCustomerPrint === 0;
               if (!isFreeItem && isPrinted) {
@@ -1250,14 +1253,8 @@ export function UnifiedTaskInvoice({
               let itemCustomerInstallationCost = item.customer_installation_cost ?? null;
 
               const itemReinstallCount = item.reinstall_count || 0;
-              if (itemReinstallCount > 0 && itemCustomerInstallationCost !== null && itemCustomerInstallationCost > 0) {
-                const baseInstallPriceForItem = sizeInfo.installationPrice || 0;
-                const halfBasePrice = baseInstallPriceForItem / 2;
-                if (itemCustomerInstallationCost === baseInstallPriceForItem ||
-                  (facesCountForBillboard === 1 && itemCustomerInstallationCost === halfBasePrice)) {
-                  const multiplier = itemReinstallCount + 1;
-                  itemCustomerInstallationCost = itemCustomerInstallationCost * multiplier;
-                }
+              if (itemReinstallCount > 0) {
+                itemCustomerInstallationCost = (item.customer_original_install_cost || 0) + (item.customer_reinstall_cost || item.customer_installation_cost || 0);
               }
 
               const isInstallByMeter = itemPricingType === 'meter' && itemPricePerMeter > 0;
@@ -1292,12 +1289,11 @@ export function UnifiedTaskInvoice({
                 const baseInstallPrice = sizeInfo.installationPrice || 0;
                 const archivedPhotos = photoHistoryMap[item.id];
 
-                // ✅ التركيب الأصلي = 0 للزبون (الزبون يدفع فقط إعادة التركيب)
-                const originalInstallCost = 0;
-                const originalInstallCostPerFace = 0;
+                // ✅ استخدام التكاليف التفصيلية المخزنة بدلاً من تصفير التركيب الأصلي
+                const originalInstallCost = Number(item.customer_original_install_cost) || 0;
+                const originalInstallCostPerFace = originalInstallCost / 2;
 
-                // ✅ تكلفة إعادة التركيب = كامل تكلفة التركيب المحسوبة على الزبون
-                const reinstallCost = actualItemInstallCost;
+                const reinstallCost = Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0;
                 const reinstallFacesCount = item.reinstalled_faces === 'both' ? 2 : 1;
                 const reinstallCostPerFace = reinstallCost / reinstallFacesCount;
 
@@ -1314,9 +1310,9 @@ export function UnifiedTaskInvoice({
                   quantity: 1,
                   area: areaPerFace,
                   printCost: printCostPerFace,
-                  installationCost: 0, // التركيب الأصلي مجاني للزبون
+                  installationCost: originalInstallCostPerFace,
                   cutoutCost: hasCutout ? taskCutoutCostPerBillboard / 2 : 0,
-                  totalCost: printCostPerFace + 0 + (hasCutout ? taskCutoutCostPerBillboard / 2 : 0),
+                  totalCost: printCostPerFace + originalInstallCostPerFace + (hasCutout ? taskCutoutCostPerBillboard / 2 : 0),
                   billboardName: item.billboard?.Billboard_Name || `لوحة #${billboardId}`,
                   billboardImage,
                   nearestLandmark,
@@ -1324,7 +1320,7 @@ export function UnifiedTaskInvoice({
                   city,
                   facesCount: 2, // التركيب الأصلي دائماً وجهين
                   billboardId: originalBillboardId,
-                  installationPricePerPiece: 0, // مجاني
+                  installationPricePerPiece: originalInstallCost,
                   installationCalculationType: 'piece' as const,
                   billboardType,
                   reinstallCount: 0,
@@ -1345,9 +1341,9 @@ export function UnifiedTaskInvoice({
                   quantity: 1,
                   area: areaPerFace,
                   printCost: printCostPerFace,
-                  installationCost: 0, // التركيب الأصلي مجاني للزبون
+                  installationCost: originalInstallCostPerFace,
                   cutoutCost: hasCutout ? taskCutoutCostPerBillboard / 2 : 0,
-                  totalCost: printCostPerFace + 0 + (hasCutout ? taskCutoutCostPerBillboard / 2 : 0),
+                  totalCost: printCostPerFace + originalInstallCostPerFace + (hasCutout ? taskCutoutCostPerBillboard / 2 : 0),
                   billboardName: item.billboard?.Billboard_Name || `لوحة #${billboardId}`,
                   billboardImage,
                   nearestLandmark,
@@ -1355,7 +1351,7 @@ export function UnifiedTaskInvoice({
                   city,
                   facesCount: 2,
                   billboardId: originalBillboardId,
-                  installationPricePerPiece: 0, // مجاني
+                  installationPricePerPiece: originalInstallCost,
                   installationCalculationType: 'piece' as const,
                   billboardType,
                   reinstallCount: 0,

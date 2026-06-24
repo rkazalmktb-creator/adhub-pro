@@ -148,15 +148,13 @@ export default function EmployeeDetail() {
     }
   }, [id]);
 
-  const loadOperatingExpensesData = async () => {
+  const loadOperatingExpensesData = async (empData: any) => {
     try {
       // Load withdrawals
       const { data: withdrawalsData } = await supabase
         .from('expenses_withdrawals')
         .select('*')
         .order('date', { ascending: false });
-
-      setWithdrawals(withdrawalsData || []);
 
       // Load closures - جميع التساكير (مثل صفحة مستحقات التشغيل Expenses.tsx)
       const { data: closuresData } = await supabase
@@ -178,23 +176,45 @@ export default function EmployeeDetail() {
         }
       });
 
-      // دالة للتحقق إذا كان العقد مغطى بتسكير
-      const isContractCoveredByClosure = (contractNumber: number): boolean => {
+      // دالة للتحقق إذا كان العقد مغطى بتسكير تدعم التاريخ ونطاق العقود
+      const isContractCoveredByClosure = (contractNum: number, startDateStr: string): boolean => {
         if (!closuresData || closuresData.length === 0) return false;
         return closuresData.some((closure: any) => {
           if (closure.closure_type === 'contract_range') {
             const start = Number(closure.contract_start) || 0;
             const end = Number(closure.contract_end) || 0;
-            return contractNumber >= start && contractNumber <= end;
+            return contractNum >= start && contractNum <= end;
+          } else if (closure.closure_type === 'period' && closure.period_start && closure.period_end) {
+            if (!startDateStr) return false;
+            const contractDate = new Date(startDateStr);
+            const closureStart = new Date(closure.period_start);
+            const closureEnd = new Date(closure.period_end);
+            return contractDate >= closureStart && contractDate <= closureEnd;
           }
           return false;
         });
       };
 
-      // Get operating fees from contracts with Total Rent
+      // Get operating fees from contracts with all required fields
       const { data: contractsData } = await supabase
         .from('Contract')
-        .select('Contract_Number, "Total Rent", installation_cost, print_cost, operating_fee_rate');
+        .select(`
+          Contract_Number, 
+          "Total Rent", 
+          Total,
+          installation_cost, 
+          print_cost, 
+          operating_fee_rate, 
+          operating_fee_rate_installation, 
+          operating_fee_rate_print, 
+          include_operating_in_installation, 
+          include_operating_in_print,
+          friend_rental_operating_fee_enabled,
+          friend_rental_operating_fee_rate,
+          friend_rental_data,
+          partnership_operating_data,
+          "Contract Date"
+        `);
       
       // جلب المدفوعات الفعلية لكل عقد
       const { data: paymentsData } = await supabase
@@ -213,30 +233,91 @@ export default function EmployeeDetail() {
         }
       });
       
-      // فلترة العقود غير المغطاة بالتسكير وغير المستبعدة
-      const uncoveredContracts = (contractsData || []).filter(c => {
-        const contractNum = c.Contract_Number;
-        const isExcluded = excludedSet.has(String(contractNum));
-        const isClosed = isContractCoveredByClosure(contractNum);
-        return !isExcluded && !isClosed;
+      // حساب النسبة والتفاصيل لكل عقد بنسبة مطابقة تماماً لـ Expenses.tsx
+      const allContracts = (contractsData || []).map((c: any) => {
+        const contractNum = Number(c.Contract_Number) || 0;
+        const rentCost = Number(c['Total Rent']) || 0;
+        const installationCost = Number(c.installation_cost) || 0;
+        const printCost = Number(c.print_cost) || 0;
+        
+        const includeInstallation = c.include_operating_in_installation === true;
+        const includePrint = c.include_operating_in_print === true;
+        
+        const totalAmount = Number(c.Total ?? (rentCost + installationCost + printCost));
+        const totalPaid = paidByContract[String(c.Contract_Number)] || 0;
+        
+        const feePercent = Number(c.operating_fee_rate) || 0;
+        const feePercentInstallation = Number(c.operating_fee_rate_installation ?? feePercent) || 0;
+        const feePercentPrint = Number(c.operating_fee_rate_print ?? feePercent) || 0;
+        
+        // Friend rentals
+        const friendOpEnabled = c.friend_rental_operating_fee_enabled === true;
+        const friendOpRate = Number(c.friend_rental_operating_fee_rate) || 0;
+        let friendCostsTotal = 0;
+        const rawFriendData = c.friend_rental_data;
+        if (rawFriendData) {
+          try {
+            const data = typeof rawFriendData === 'string' ? JSON.parse(rawFriendData) : rawFriendData;
+            if (Array.isArray(data)) {
+              friendCostsTotal = data.reduce((sum: number, item: any) => sum + (Number(item.friendRentalCost ?? item.friend_rental_cost) || 0), 0);
+            }
+          } catch (e) {
+            console.warn('Failed to parse friend_rental_data:', e);
+          }
+        }
+        const friendFeeFull = friendOpEnabled ? Math.round(friendCostsTotal * (friendOpRate / 100)) : 0;
+        
+        // Partnership
+        let partnershipFeeFull = 0;
+        const rawPartnership = c.partnership_operating_data;
+        if (rawPartnership) {
+          try {
+            const data = typeof rawPartnership === 'string' ? JSON.parse(rawPartnership) : rawPartnership;
+            if (Array.isArray(data)) {
+              partnershipFeeFull = data.reduce((sum: number, item: any) => sum + (Number(item.operating_fee_amount) || 0), 0);
+            }
+          } catch (e) {}
+        }
+        
+        // Ratio capped at 1
+        const paymentRatio = totalAmount > 0 ? Math.min(1, totalPaid / totalAmount) : 0;
+        
+        const regularRentalBase = Math.max(0, rentCost - friendCostsTotal);
+        let collectedFee = Math.round(regularRentalBase * paymentRatio * (feePercent / 100));
+        if (includeInstallation) collectedFee += Math.round(installationCost * paymentRatio * (feePercentInstallation / 100));
+        if (includePrint) collectedFee += Math.round(printCost * paymentRatio * (feePercentPrint / 100));
+        collectedFee += Math.round((friendFeeFull + partnershipFeeFull) * paymentRatio);
+        
+        const startDate = c['Contract Date'] ?? c.start_date ?? '';
+        
+        return {
+          contractNumber: contractNum,
+          collectedFeeAmount: collectedFee,
+          startDate,
+          isExcluded: excludedSet.has(String(contractNum))
+        };
       });
 
-      // ✅ حساب النسبة المتحصلة فعلياً من سعر الإيجار فقط
-      const totalOperatingDues = uncoveredContracts.reduce((sum, c) => {
-        const feeRate = Number(c.operating_fee_rate) || 0;
-        const rentCost = Number(c['Total Rent']) || 0;
-        const installCost = Number(c.installation_cost) || 0;
-        const printCost = Number(c.print_cost) || 0;
-        const totalAmount = rentCost + installCost + printCost;
-        const totalPaid = paidByContract[String(c.Contract_Number)] || 0;
-        const rentPaidEstimate = totalAmount > 0 ? totalPaid * (rentCost / totalAmount) : 0;
-        const collectedFeeAmount = Math.round(rentPaidEstimate * (feeRate / 100));
-        return sum + collectedFeeAmount;
-      }, 0);
+      // فلترة العقود غير المغطاة بالتسكير وغير المستبعدة وتحديد بداية النسبة لعقود >= 1086
+      const uncoveredContracts = allContracts.filter(c => {
+        if (c.contractNumber < 1086) return false;
+        if (c.isExcluded) return false;
+        
+        const isClosed = isContractCoveredByClosure(c.contractNumber, c.startDate);
+        return !isClosed;
+      });
+
+      const totalOperatingDues = uncoveredContracts.reduce((sum, c) => sum + c.collectedFeeAmount, 0);
+
+      // فلترة السحوبات الخاصة بالموظف الحالي
+      const filteredWithdrawals = (withdrawalsData || []).filter((w: any) => {
+        if (w.receiver_name === empData.name) return true;
+        if (!w.receiver_name) return true; // السحوبات القديمة غير محددة الاسم تتبع له كمدير تشغيل وحيد
+        return false;
+      });
 
       // حساب إجمالي السحوبات
-      const totalWithdrawals = (withdrawalsData || [])
-        .reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
+      const totalWithdrawals = filteredWithdrawals.reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
 
       const contractsCount = uncoveredContracts.length;
       const remainingBalance = totalOperatingDues - totalWithdrawals;
@@ -246,8 +327,10 @@ export default function EmployeeDetail() {
         totalOperatingFees: totalOperatingDues,
         totalWithdrawals: totalWithdrawals,
         remainingBalance: remainingBalance,
-        withdrawalsCount: (withdrawalsData || []).length
+        withdrawalsCount: filteredWithdrawals.length
       });
+
+      setWithdrawals(filteredWithdrawals);
     } catch (error) {
       console.error('Error loading operating expenses:', error);
     }
@@ -269,7 +352,7 @@ export default function EmployeeDetail() {
       
       // Load operating expenses data if linked
       if (employeeData.linked_to_operating_expenses) {
-        await loadOperatingExpensesData();
+        await loadOperatingExpensesData(employeeData);
       }
 
       // Load installation team if exists
@@ -613,38 +696,38 @@ export default function EmployeeDetail() {
   const COLORS = ['#10b981', '#f59e0b'];
 
   return (
-    <div className="container mx-auto p-6 space-y-6 text-right" dir="rtl">
+    <div className="container mx-auto p-6 space-y-6 text-right" dir="rtl" style={{ fontFamily: "'Tajawal', sans-serif" }}>
       {/* Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/5 to-transparent border border-blue-500/15 p-6 backdrop-blur-sm shadow-sm flex flex-col lg:flex-row items-center justify-between gap-6">
-        <div className="absolute top-0 right-0 -mt-6 -mr-6 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
-        <div className="absolute bottom-0 left-0 -mb-6 -ml-6 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#d6ac40]/12 via-[#f4c25a]/5 to-transparent border border-[#d6ac40]/25 p-6 backdrop-blur-md shadow-sm flex flex-col lg:flex-row items-center justify-between gap-6 transition-all duration-300">
+        <div className="absolute top-0 right-0 -mt-6 -mr-6 w-32 h-32 bg-[#d6ac40]/10 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute bottom-0 left-0 -mb-6 -ml-6 w-32 h-32 bg-[#f4c25a]/5 rounded-full blur-2xl pointer-events-none" />
         
         <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto">
           <Button 
             variant="ghost" 
             size="icon" 
             onClick={() => navigate('/admin/salaries')}
-            className="h-10 w-10 rounded-full border border-blue-500/10 bg-white/40 dark:bg-black/20 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 transition-colors shrink-0"
+            className="h-10 w-10 rounded-full border border-[#d6ac40]/20 bg-background/50 text-[#b8860b] dark:text-[#f4c25a] hover:bg-[#d6ac40]/15 transition-all duration-200 cursor-pointer shrink-0"
           >
             <ArrowRight className="h-5 w-5" />
           </Button>
           <div className="text-center sm:text-right">
             <h1 className="text-2xl md:text-3xl font-extrabold text-foreground tracking-tight">{employee.name}</h1>
             <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-2">
-              <Badge className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/25 px-3 py-0.5 text-xs font-semibold rounded-full">
+              <Badge className="bg-[#d6ac40]/10 text-[#b8860b] dark:text-[#f4c25a] border border-[#d6ac40]/25 px-3 py-0.5 text-xs font-bold rounded-full">
                 {employee.position || 'موظف'}
               </Badge>
-              <Badge className={`px-3 py-0.5 text-xs font-semibold rounded-full border ${
+              <Badge className={`px-3 py-0.5 text-xs font-bold rounded-full border ${
                 employee.status === 'active' 
                   ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25' 
                   : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25'
               }`}>
                 {employee.status === 'active' ? 'نشط' : 'غير نشط'}
               </Badge>
-              <Badge className={`px-3 py-0.5 text-xs font-semibold rounded-full border ${
+              <Badge className={`px-3 py-0.5 text-xs font-bold rounded-full border ${
                 employee.salary_type === 'monthly' 
                   ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/25' 
-                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25'
+                  : 'bg-[#d6ac40]/10 text-[#b8860b] dark:text-[#f4c25a] border-[#d6ac40]/25'
               }`}>
                 {employee.salary_type === 'monthly' ? 'راتب شهري' : 'بنظام العمل'}
               </Badge>
@@ -652,10 +735,10 @@ export default function EmployeeDetail() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 w-full sm:w-auto justify-center lg:justify-end">
+        <div className="flex flex-wrap gap-2.5 w-full sm:w-auto justify-center lg:justify-end">
           <Button 
             onClick={() => setTaskDialogOpen(true)} 
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold gap-2 shadow-sm shadow-blue-500/10 rounded-xl"
+            className="bg-gradient-to-r from-[#b8860b] to-[#d6ac40] hover:from-[#d6ac40] hover:to-[#f4c25a] text-white hover:shadow-lg hover:shadow-yellow-500/10 rounded-xl transition-all duration-200 cursor-pointer font-bold gap-2"
           >
             <Plus className="h-4 w-4" />
             إضافة عمل يدوي
@@ -671,8 +754,7 @@ export default function EmployeeDetail() {
                 setSenderName('');
                 setPaymentDialogOpen(true);
               }} 
-              variant="secondary" 
-              className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-950/60 font-bold gap-2 rounded-xl border border-indigo-500/10"
+              className="bg-[#d6ac40]/10 text-[#b8860b] dark:text-[#f4c25a] hover:bg-[#d6ac40]/20 rounded-xl border border-[#d6ac40]/25 font-bold gap-2 cursor-pointer transition-all duration-200"
             >
               <Wallet className="h-4 w-4" />
               سحب من الحساب
@@ -686,7 +768,7 @@ export default function EmployeeDetail() {
               setAdvanceDialogOpen(true);
             }} 
             variant="outline" 
-            className="border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 font-bold gap-2 rounded-xl"
+            className="border-[#d6ac40]/20 hover:bg-[#d6ac40]/5 text-foreground font-bold gap-2 rounded-xl cursor-pointer transition-all duration-200"
           >
             <DollarSign className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
             إضافة سلفة
@@ -696,14 +778,14 @@ export default function EmployeeDetail() {
 
       {/* Info Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="relative overflow-hidden rounded-2xl border border-blue-500/10 bg-gradient-to-br from-blue-500/[0.02] to-indigo-500/[0.02] p-5 shadow-sm">
+        <div className="relative overflow-hidden rounded-2xl border border-[#d6ac40]/15 bg-gradient-to-br from-[#d6ac40]/[0.02] to-[#f4c25a]/[0.01] p-5 shadow-sm">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+            <div className="p-2.5 rounded-xl bg-[#d6ac40]/10 text-[#b8860b] dark:text-[#f4c25a]">
               <DollarSign className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground font-semibold">نوع الراتب والاحتساب</p>
-              <p className="text-sm font-bold mt-1 text-foreground">
+              <p className="text-xs text-muted-foreground font-bold">نوع الراتب والاحتساب</p>
+              <p className="text-sm font-extrabold mt-1 text-foreground">
                 {employee.salary_type === 'monthly' ? 'راتب شهري أساسي' : 'نظام إنتاج بالعمل المكتمل'}
               </p>
             </div>
@@ -711,27 +793,27 @@ export default function EmployeeDetail() {
         </div>
 
         {employee.installation_team_id && installationTeam ? (
-          <div className="relative overflow-hidden rounded-2xl border border-teal-500/10 bg-gradient-to-br from-teal-500/[0.02] to-emerald-500/[0.02] p-5 shadow-sm">
+          <div className="relative overflow-hidden rounded-2xl border border-teal-500/15 bg-gradient-to-br from-teal-500/[0.02] to-emerald-500/[0.02] p-5 shadow-sm">
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400">
                 <Wrench className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-xs text-muted-foreground font-semibold">فرقة التركيب التابعة</p>
-                <p className="text-sm font-bold mt-1 text-foreground">
+                <p className="text-xs text-muted-foreground font-bold">فرقة التركيب التابعة</p>
+                <p className="text-sm font-extrabold mt-1 text-foreground">
                   {installationTeam.team_name}
                 </p>
               </div>
             </div>
           </div>
         ) : (
-          <div className="relative overflow-hidden rounded-2xl border border-slate-500/10 bg-slate-500/[0.02] p-5 shadow-sm">
+          <div className="relative overflow-hidden rounded-2xl border border-border bg-muted/20 p-5 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-slate-500/10 text-slate-500">
+              <div className="p-2.5 rounded-xl bg-muted text-muted-foreground">
                 <Wrench className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-xs text-muted-foreground font-semibold">فرقة التركيب</p>
+                <p className="text-xs text-muted-foreground font-bold">فرقة التركيب</p>
                 <p className="text-sm font-bold mt-1 text-muted-foreground">غير مرتبطة بفرقة تركيب</p>
               </div>
             </div>
@@ -739,41 +821,41 @@ export default function EmployeeDetail() {
         )}
 
         {employee.linked_to_operating_expenses ? (
-          <div className="relative overflow-hidden rounded-2xl border border-orange-500/10 bg-gradient-to-br from-orange-500/[0.02] to-amber-500/[0.02] p-5 shadow-sm">
+          <div className="relative overflow-hidden rounded-2xl border border-[#d6ac40]/20 bg-gradient-to-br from-[#d6ac40]/[0.02] to-[#b8860b]/[0.02] p-5 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400">
+              <div className="p-2.5 rounded-xl bg-[#d6ac40]/15 text-[#b8860b] dark:text-[#f4c25a]">
                 <Wallet className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-xs text-muted-foreground font-semibold">مستحقات التشغيل</p>
-                <p className="text-sm font-bold text-orange-600 dark:text-orange-400 mt-1">
+                <p className="text-xs text-muted-foreground font-bold">مستحقات التشغيل</p>
+                <p className="text-sm font-extrabold text-[#b8860b] dark:text-[#f4c25a] mt-1">
                   مرتبط بحساب نسبة عقود التشغيل
                 </p>
               </div>
             </div>
           </div>
         ) : (
-          <div className="relative overflow-hidden rounded-2xl border border-slate-500/10 bg-slate-500/[0.02] p-5 shadow-sm">
+          <div className="relative overflow-hidden rounded-2xl border border-border bg-muted/20 p-5 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-slate-500/10 text-slate-500">
+              <div className="p-2.5 rounded-xl bg-muted text-muted-foreground">
                 <Wallet className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-xs text-muted-foreground font-semibold">مستحقات التشغيل</p>
+                <p className="text-xs text-muted-foreground font-bold">مستحقات التشغيل</p>
                 <p className="text-sm font-bold mt-1 text-muted-foreground">غير مرتبط بمصروفات التشغيل</p>
               </div>
             </div>
           </div>
         )}
 
-        <div className="relative overflow-hidden rounded-2xl border border-indigo-500/10 bg-gradient-to-br from-indigo-500/[0.02] to-purple-500/[0.02] p-5 shadow-sm">
+        <div className="relative overflow-hidden rounded-2xl border border-[#d6ac40]/15 bg-gradient-to-br from-[#d6ac40]/[0.02] to-[#f4c25a]/[0.01] p-5 shadow-sm">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+            <div className="p-2.5 rounded-xl bg-[#d6ac40]/10 text-[#b8860b] dark:text-[#f4c25a]">
               <Calendar className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground font-semibold">تاريخ التعيين والتعاقد</p>
-              <p className="text-sm font-bold mt-1 text-foreground">
+              <p className="text-xs text-muted-foreground font-bold">تاريخ التعيين والتعاقد</p>
+              <p className="text-sm font-extrabold mt-1 text-foreground">
                 {employee.hire_date ? new Date(employee.hire_date).toLocaleDateString('ar-LY') : '-'}
               </p>
             </div>
@@ -783,17 +865,17 @@ export default function EmployeeDetail() {
 
       {/* Stats Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="border-blue-500/20 bg-blue-500/[0.02] hover:bg-blue-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-24 h-24 bg-blue-500/5 rounded-full blur-xl pointer-events-none -mt-4 -ml-4" />
+        <Card className="border-[#d6ac40]/25 bg-gradient-to-br from-[#d6ac40]/[0.02] to-[#f4c25a]/[0.01] hover:bg-[#d6ac40]/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden rounded-2xl">
+          <div className="absolute top-0 left-0 w-24 h-24 bg-[#d6ac40]/5 rounded-full blur-xl pointer-events-none -mt-4 -ml-4" />
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-xs font-bold text-muted-foreground">إجمالي المستحقات</CardTitle>
-            <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
+            <CardTitle className="text-xs font-bold text-[#b8860b] dark:text-[#f4c25a]">إجمالي المستحقات</CardTitle>
+            <div className="p-1.5 rounded-lg bg-[#d6ac40]/15 text-[#b8860b] dark:text-[#f4c25a]">
               <DollarSign className="h-4 w-4" />
             </div>
           </CardHeader>
           <CardContent className="pt-2">
-            <div className="text-2xl font-black text-blue-600 dark:text-blue-400 font-manrope">
-              {totalDue.toLocaleString('ar-LY')} <span className="text-xs font-semibold">د.ل</span>
+            <div className="text-2xl font-black text-[#b8860b] dark:text-[#f4c25a] font-manrope">
+              {totalDue.toLocaleString('ar-LY')} <span className="text-xs font-bold">د.ل</span>
             </div>
             <p className="text-xs text-muted-foreground mt-1.5">
               {isLinkedToOperating 
@@ -805,17 +887,17 @@ export default function EmployeeDetail() {
           </CardContent>
         </Card>
 
-        <Card className="border-emerald-500/20 bg-emerald-500/[0.02] hover:bg-emerald-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden">
+        <Card className="border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.02] to-teal-500/[0.01] hover:bg-emerald-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden rounded-2xl">
           <div className="absolute top-0 left-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-xl pointer-events-none -mt-4 -ml-4" />
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-xs font-bold text-muted-foreground">المدفوع الفعلي</CardTitle>
+            <CardTitle className="text-xs font-bold text-emerald-600 dark:text-emerald-400">المدفوع الفعلي</CardTitle>
             <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
               <Wallet className="h-4 w-4" />
             </div>
           </CardHeader>
           <CardContent className="pt-2">
             <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-manrope">
-              {totalPaid.toLocaleString('ar-LY')} <span className="text-xs font-semibold">د.ل</span>
+              {totalPaid.toLocaleString('ar-LY')} <span className="text-xs font-bold">د.ل</span>
             </div>
             <p className="text-xs text-muted-foreground mt-1.5">
               {isLinkedToOperating 
@@ -828,17 +910,17 @@ export default function EmployeeDetail() {
           </CardContent>
         </Card>
 
-        <Card className="border-rose-500/20 bg-rose-500/[0.02] hover:bg-rose-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden">
+        <Card className="border-rose-500/20 bg-gradient-to-br from-rose-500/[0.02] to-red-500/[0.01] hover:bg-rose-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden rounded-2xl">
           <div className="absolute top-0 left-0 w-24 h-24 bg-rose-500/5 rounded-full blur-xl pointer-events-none -mt-4 -ml-4" />
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-xs font-bold text-muted-foreground">السلف المتبقية</CardTitle>
+            <CardTitle className="text-xs font-bold text-rose-600 dark:text-rose-400">السلف المتبقية</CardTitle>
             <div className="p-1.5 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400">
               <TrendingUp className="h-4 w-4" />
             </div>
           </CardHeader>
           <CardContent className="pt-2">
             <div className="text-2xl font-black text-rose-600 dark:text-rose-400 font-manrope">
-              {totalAdvances.toLocaleString('ar-LY')} <span className="text-xs font-semibold">د.ل</span>
+              {totalAdvances.toLocaleString('ar-LY')} <span className="text-xs font-bold">د.ل</span>
             </div>
             <p className="text-xs text-muted-foreground mt-1.5">
               {advances.filter(a => a.status === 'approved' && a.remaining > 0).length} سلفة نشطة قيد التحصيل
@@ -846,17 +928,17 @@ export default function EmployeeDetail() {
           </CardContent>
         </Card>
 
-        <Card className="border-indigo-500/20 bg-indigo-500/[0.02] hover:bg-indigo-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-24 h-24 bg-indigo-500/5 rounded-full blur-xl pointer-events-none -mt-4 -ml-4" />
+        <Card className="border-[#d6ac40]/30 bg-gradient-to-br from-[#d6ac40]/[0.03] to-[#b8860b]/[0.01] hover:bg-[#d6ac40]/[0.05] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden rounded-2xl">
+          <div className="absolute top-0 left-0 w-24 h-24 bg-[#d6ac40]/5 rounded-full blur-xl pointer-events-none -mt-4 -ml-4" />
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-xs font-bold text-muted-foreground">الرصيد الصافي المتبقي</CardTitle>
-            <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+            <CardTitle className="text-xs font-bold text-[#b8860b] dark:text-[#f4c25a]">الرصيد الصافي المتبقي</CardTitle>
+            <div className="p-1.5 rounded-lg bg-[#d6ac40]/15 text-[#b8860b] dark:text-[#f4c25a]">
               <Activity className="h-4 w-4" />
             </div>
           </CardHeader>
           <CardContent className="pt-2">
-            <div className={`text-2xl font-black font-manrope ${netBalance >= 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-600 dark:text-rose-400'}`}>
-              {netBalance.toLocaleString('ar-LY')} <span className="text-xs font-semibold">د.ل</span>
+            <div className={`text-2xl font-black font-manrope ${netBalance >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+              {netBalance.toLocaleString('ar-LY')} <span className="text-xs font-bold">د.ل</span>
             </div>
             <p className="text-xs text-muted-foreground mt-1.5">
               {netBalance >= 0 ? 'مستحقات صافية للموظف في ذمة الشركة' : 'دين مستحق على الموظف لصالح الشركة'}
@@ -867,11 +949,11 @@ export default function EmployeeDetail() {
 
       {/* Operating Expenses Section - Show only if linked */}
       {employee.linked_to_operating_expenses && (
-        <Card className="relative overflow-hidden border border-orange-500/20 bg-gradient-to-br from-orange-500/[0.02] via-transparent to-transparent shadow-sm">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/5 rounded-full blur-3xl pointer-events-none" />
-          <CardHeader className="border-b border-orange-500/10 pb-4">
-            <CardTitle className="flex items-center gap-2.5 text-orange-700 dark:text-orange-400 font-bold">
-              <div className="p-1.5 rounded-lg bg-orange-500/10">
+        <Card className="relative overflow-hidden border border-[#d6ac40]/25 bg-gradient-to-br from-[#d6ac40]/[0.02] via-transparent to-transparent shadow-sm">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-[#d6ac40]/5 rounded-full blur-3xl pointer-events-none" />
+          <CardHeader className="border-b border-[#d6ac40]/15 pb-4">
+            <CardTitle className="flex items-center gap-2.5 text-[#b8860b] dark:text-[#f4c25a] font-bold">
+              <div className="p-1.5 rounded-lg bg-[#d6ac40]/15">
                 <Wallet className="h-5 w-5" />
               </div>
               إدارة مستحقات التشغيل وعقود المعاملات
@@ -885,23 +967,23 @@ export default function EmployeeDetail() {
               
               {/* Operating Stats */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-orange-500/[0.01] dark:bg-black/20 rounded-xl p-4 border border-orange-500/10">
-                  <p className="text-xs text-muted-foreground font-semibold mb-1">إجمالي العقود النشطة</p>
+                <div className="bg-[#d6ac40]/[0.01] dark:bg-black/20 rounded-xl p-4 border border-[#d6ac40]/15">
+                  <p className="text-xs text-muted-foreground font-bold mb-1">إجمالي العقود النشطة</p>
                   <p className="text-2xl font-black text-foreground font-manrope">
                     {operatingStats.totalContracts} <span className="text-xs text-muted-foreground font-normal">عقود</span>
                   </p>
                 </div>
                 
-                <div className="bg-orange-500/[0.01] dark:bg-black/20 rounded-xl p-4 border border-orange-500/10">
-                  <p className="text-xs text-muted-foreground font-semibold mb-1">المجموع العام للنسبة</p>
-                  <p className="text-2xl font-black text-foreground font-manrope">
+                <div className="bg-[#d6ac40]/[0.01] dark:bg-black/20 rounded-xl p-4 border border-[#d6ac40]/15">
+                  <p className="text-xs text-muted-foreground font-bold mb-1">المجموع العام للنسبة</p>
+                  <p className="text-2xl font-black text-[#b8860b] dark:text-[#f4c25a] font-manrope">
                     {operatingStats.totalOperatingFees.toLocaleString('ar-LY')} <span className="text-xs text-muted-foreground font-normal">د.ل</span>
                   </p>
                   <p className="text-[10px] text-muted-foreground mt-1">المتحصلة من إيجار العقود</p>
                 </div>
                 
-                <div className="bg-orange-500/[0.01] dark:bg-black/20 rounded-xl p-4 border border-orange-500/10">
-                  <p className="text-xs text-muted-foreground font-semibold mb-1">المسحوبات الفعلية</p>
+                <div className="bg-[#d6ac40]/[0.01] dark:bg-black/20 rounded-xl p-4 border border-[#d6ac40]/15">
+                  <p className="text-xs text-muted-foreground font-bold mb-1">المسحوبات الفعلية</p>
                   <p className="text-2xl font-black text-foreground font-manrope">
                     {operatingStats.totalWithdrawals.toLocaleString('ar-LY')} <span className="text-xs text-muted-foreground font-normal">د.ل</span>
                   </p>
@@ -910,53 +992,53 @@ export default function EmployeeDetail() {
                   </p>
                 </div>
                 
-                <div className="bg-orange-500/[0.01] dark:bg-black/20 rounded-xl p-4 border border-orange-500/10">
-                  <p className="text-xs text-muted-foreground font-semibold mb-1">الرصيد المتبقي المتاح</p>
+                <div className="bg-[#d6ac40]/[0.01] dark:bg-black/20 rounded-xl p-4 border border-[#d6ac40]/15">
+                  <p className="text-xs text-muted-foreground font-bold mb-1">الرصيد المتبقي المتاح</p>
                   <p className={`text-2xl font-black font-manrope ${operatingStats.remainingBalance >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                    {operatingStats.remainingBalance.toLocaleString('ar-LY')} <span className="text-xs font-normal">د.ل</span>
+                    {operatingStats.remainingBalance.toLocaleString('ar-LY')} <span className="text-xs font-bold">د.ل</span>
                   </p>
                 </div>
               </div>
               
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="p-4 rounded-xl bg-orange-500/[0.01] dark:bg-black/10 border border-orange-500/5 hover:border-orange-500/10 hover:bg-orange-500/[0.02] transition-colors">
+                <div className="p-4 rounded-xl bg-[#d6ac40]/[0.01] dark:bg-black/10 border border-[#d6ac40]/10 hover:border-[#d6ac40]/25 hover:bg-[#d6ac40]/[0.03] transition-all cursor-pointer">
                   <div className="flex items-center gap-2 mb-1.5">
-                    <FileText className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                    <FileText className="h-4 w-4 text-[#b8860b] dark:text-[#f4c25a]" />
                     <p className="text-xs font-bold text-foreground">إدارة وتتبع العقود</p>
                   </div>
                   <p className="text-[11px] text-muted-foreground">مراجعة وتحليل نسب التشغيل التفصيلية لكل عقد على حدة.</p>
                 </div>
                 
-                <div className="p-4 rounded-xl bg-orange-500/[0.01] dark:bg-black/10 border border-orange-500/5 hover:border-orange-500/10 hover:bg-orange-500/[0.02] transition-colors">
+                <div className="p-4 rounded-xl bg-[#d6ac40]/[0.01] dark:bg-black/10 border border-[#d6ac40]/10 hover:border-[#d6ac40]/25 hover:bg-[#d6ac40]/[0.03] transition-all cursor-pointer">
                   <div className="flex items-center gap-2 mb-1.5">
-                    <DollarSign className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                    <DollarSign className="h-4 w-4 text-[#b8860b] dark:text-[#f4c25a]" />
                     <p className="text-xs font-bold text-foreground">سجل حركات السحب</p>
                   </div>
                   <p className="text-[11px] text-muted-foreground">تسجيل وإدارة عمليات سحب المبالغ النقدية وطباعة الإيصالات.</p>
                 </div>
                 
-                <div className="p-4 rounded-xl bg-orange-500/[0.01] dark:bg-black/10 border border-orange-500/5 hover:border-orange-500/10 hover:bg-orange-500/[0.02] transition-colors">
+                <div className="p-4 rounded-xl bg-[#d6ac40]/[0.01] dark:bg-black/10 border border-[#d6ac40]/10 hover:border-[#d6ac40]/25 hover:bg-[#d6ac40]/[0.03] transition-all cursor-pointer">
                   <div className="flex items-center gap-2 mb-1.5">
-                    <CheckCircle className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                    <CheckCircle className="h-4 w-4 text-[#b8860b] dark:text-[#f4c25a]" />
                     <p className="text-xs font-bold text-foreground">إغلاق الفترة المالي</p>
                   </div>
                   <p className="text-[11px] text-muted-foreground">تسكير الحسابات الدورية واعتماد حركات التسكير وحفظ الأرشيف.</p>
                   {closures.length > 0 && closures[0].closure_type === 'contract_range' && (
-                    <div className="mt-2.5 p-2 bg-orange-500/5 dark:bg-orange-950/20 rounded-lg text-[10px] border border-orange-500/10">
-                      <p className="font-bold text-orange-800 dark:text-orange-300">آخر تسكير عقود:</p>
+                    <div className="mt-2.5 p-2 bg-[#d6ac40]/5 dark:bg-[#d6ac40]/10 rounded-lg text-[10px] border border-[#d6ac40]/20">
+                      <p className="font-bold text-[#b8860b] dark:text-[#f4c25a]">آخر تسكير عقود:</p>
                       <p className="text-muted-foreground mt-0.5">
                         النطاق: {closures[0].contract_start} - {closures[0].contract_end}
                       </p>
-                      <p className="text-orange-600 dark:text-orange-400 font-semibold mt-0.5">
+                      <p className="text-[#b8860b] dark:text-[#f4c25a] font-bold mt-0.5">
                         بتاريخ: {new Date(closures[0].closure_date).toLocaleDateString('ar-LY')}
                       </p>
                     </div>
                   )}
                 </div>
                 
-                <div className="p-4 rounded-xl bg-orange-500/[0.01] dark:bg-black/10 border border-orange-500/5 hover:border-orange-500/10 hover:bg-orange-500/[0.02] transition-colors">
+                <div className="p-4 rounded-xl bg-[#d6ac40]/[0.01] dark:bg-black/10 border border-[#d6ac40]/10 hover:border-[#d6ac40]/25 hover:bg-[#d6ac40]/[0.03] transition-all cursor-pointer">
                   <div className="flex items-center gap-2 mb-1.5">
-                    <FileText className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                    <FileText className="h-4 w-4 text-[#b8860b] dark:text-[#f4c25a]" />
                     <p className="text-xs font-bold text-foreground">التقارير والمطابقات</p>
                   </div>
                   <p className="text-[11px] text-muted-foreground">استخراج وتصدير كشوفات الحساب المالية وعمل المطابقات الدورية.</p>
@@ -965,7 +1047,7 @@ export default function EmployeeDetail() {
               
               <Button 
                 onClick={() => navigate('/admin/expenses')}
-                className="w-full bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 text-white font-bold gap-2 shadow-sm shadow-orange-500/15 rounded-xl py-6"
+                className="w-full bg-gradient-to-r from-[#b8860b] to-[#d6ac40] hover:from-[#d6ac40] hover:to-[#f4c25a] text-white font-bold gap-2 shadow-lg shadow-yellow-500/10 rounded-xl py-6 cursor-pointer transition-all duration-200"
                 size="lg"
               >
                 <Wallet className="h-5 w-5" />
@@ -1320,7 +1402,11 @@ export default function EmployeeDetail() {
                           <TableCell className="text-xs text-muted-foreground py-3.5">
                             {withdrawal.receiver_name && withdrawal.sender_name
                               ? `${withdrawal.receiver_name} / ${withdrawal.sender_name}`
-                              : withdrawal.receiver_name || withdrawal.sender_name || '—'
+                              : withdrawal.receiver_name 
+                                ? withdrawal.receiver_name 
+                                : withdrawal.sender_name 
+                                  ? `— / ${withdrawal.sender_name}` 
+                                  : 'سحب غير محدد الاسم (محتسب)'
                             }
                           </TableCell>
                           <TableCell className="py-3.5 pl-6">

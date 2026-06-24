@@ -20,8 +20,17 @@ import {
   Receipt,
   Save,
   X,
-  Download
+  Download,
+  ChevronDown
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from '@/components/ui/dropdown-menu';
 import { generateModernPrintInvoiceHTML } from './InvoiceTemplates';
 import { SendInvoiceWhatsApp } from './SendInvoiceWhatsApp';
 import { usePrintInvoicePrint } from './PrintInvoicePrint';
@@ -896,7 +905,7 @@ export default function ModernPrintInvoiceDialog({
   };
 
   const InvoicePreview = () => (
-    <div className="bg-background text-foreground p-6 rounded-lg border border-border shadow-card w-full" dir="rtl">
+    <div className="bg-background text-foreground p-4 sm:p-6 rounded-lg border border-border shadow-card w-full max-w-full overflow-hidden" dir="rtl">
       {/* Header */}
       <div className="flex justify-between items-start mb-6 pb-4 border-b-2 border-primary">
         <div className="text-right">
@@ -927,8 +936,8 @@ export default function ModernPrintInvoiceDialog({
       {localPrintItems.length > 0 && (
         <div className="mb-6">
           <h3 className="expenses-preview-label mb-4 text-lg">تفاصيل الطباعة:</h3>
-          <div className="expenses-table-container overflow-x-auto">
-            <table className="w-full border-collapse border border-border text-sm">
+          <div className="expenses-table-container overflow-x-auto border border-border rounded-lg shadow-sm">
+            <table className="w-full border-collapse text-sm min-w-[850px]">
               <thead>
                 <tr className="bg-primary text-primary-foreground">
                   <th className="border border-border p-3 text-center font-bold">المقاس</th>
@@ -1015,57 +1024,57 @@ export default function ModernPrintInvoiceDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[1000] bg-background/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
       <div
-        className="bg-background border border-border rounded-lg shadow-lg w-[96vw] max-h-[96vh] flex flex-col"
+        className="bg-background border border-border/80 rounded-xl shadow-2xl w-full max-w-5xl h-[92vh] max-h-[92vh] flex flex-col overflow-hidden transition-all duration-300"
         dir="rtl"
       >
         {/* Header */}
-        <div className="border-b border-border pb-4 px-6 pt-4 flex-shrink-0">
+        <div className="border-b border-border/80 pb-4 px-6 pt-4 flex-shrink-0">
           <div className="flex items-center justify-between">
-            <h2 className="expenses-preview-title flex items-center gap-3 text-xl font-bold text-primary">
-              <Receipt className="h-6 w-6" />
-              فاتورة طباعة عصرية
+            <h2 className="flex items-center gap-3 text-xl font-bold text-primary">
+              <Receipt className="h-6 w-6 text-primary" />
+              <span>فاتورة طباعة عصرية</span>
             </h2>
             <Button
               variant="ghost"
               size="sm"
               onClick={onClose}
-              className="h-8 w-8 p-0"
+              className="h-8 w-8 p-0 hover:bg-accent/50 rounded-full cursor-pointer"
             >
               <X className="h-5 w-5" />
             </Button>
           </div>
 
           {/* Tabs */}
-          <div className="expenses-actions mt-4 gap-4">
+          <div className="flex gap-3 mt-4">
             <Button
               variant={activeTab === 'setup' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setActiveTab('setup')}
-              className="expenses-action-btn text-sm px-4 py-2"
+              className="text-sm px-4 py-2 gap-2 cursor-pointer transition-colors"
             >
               <Settings className="h-4 w-4" />
-              الإعداد
+              <span>الإعداد</span>
             </Button>
             <Button
               variant={activeTab === 'preview' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setActiveTab('preview')}
-              className="expenses-action-btn text-sm px-4 py-2"
+              className="text-sm px-4 py-2 gap-2 cursor-pointer transition-colors"
             >
               <Eye className="h-4 w-4" />
-              معاينة
+              <span>معاينة</span>
             </Button>
           </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-6">
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 w-full max-w-full">
           {activeTab === 'setup' ? (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 py-4">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 py-4">
               {/* Left Panel - Configuration */}
-              <div className="space-y-6">
+              <div className="lg:col-span-5 space-y-6">
                 {/* Invoice Settings */}
                 <Card className="expenses-preview-card">
                   <CardHeader className="pb-4">
@@ -1301,7 +1310,7 @@ export default function ModernPrintInvoiceDialog({
               </div>
 
               {/* Right Panel - Items */}
-              <div className="space-y-6">
+              <div className="lg:col-span-7 space-y-6">
                 {/* إضافة بند مخصص */}
                 <Card className="expenses-preview-card border-2 border-primary/30 bg-primary/5">
                   <CardHeader className="pb-4">
@@ -1556,21 +1565,21 @@ export default function ModernPrintInvoiceDialog({
               </div>
             </div>
           ) : (
-            <div className="py-4">
+            <div className="py-4 w-full max-w-full overflow-hidden">
               <InvoicePreview />
             </div>
           )}
         </div>
 
         {/* Actions */}
-        <div className="border-t border-border pt-4 pb-4 px-6 flex justify-between flex-shrink-0">
-          <div className="expenses-actions">
-            <Button variant="outline" onClick={onClose} className="text-sm px-6 py-2">
+        <div className="border-t border-border/80 pt-4 pb-4 px-6 flex justify-between items-center flex-shrink-0 flex-wrap gap-4">
+          <div>
+            <Button variant="outline" onClick={onClose} className="text-sm px-6 py-2 cursor-pointer hover:bg-accent/50">
               إغلاق
             </Button>
           </div>
 
-          <div className="expenses-actions gap-4">
+          <div className="flex items-center gap-3 flex-wrap">
             {customerPhone && (
               <SendInvoiceWhatsApp
                 customerName={customerName}
@@ -1580,52 +1589,48 @@ export default function ModernPrintInvoiceDialog({
               />
             )}
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={handleSave}
-              className="expenses-action-btn text-sm px-6 py-2"
+              className="text-sm px-4 py-2 gap-2 cursor-pointer transition-colors border border-border"
               disabled={localPrintItems.length === 0}
             >
-              <Save className="h-4 w-4" />
-              حفظ في الحساب
-            </Button>
-            <Button
-              onClick={() => handlePrint(false)}
-              className="expenses-action-btn bg-gradient-to-r from-primary to-primary-glow text-sm px-6 py-2"
-              disabled={localPrintItems.length === 0}
-            >
-              <Printer className="h-4 w-4" />
-              طباعة (مع الأسعار)
+              <Save className="h-4 w-4 text-primary" />
+              <span>حفظ في الحساب</span>
             </Button>
 
-            <Button
-              onClick={() => handleDownloadPDF(false)}
-              variant="outline"
-              className="expenses-action-btn text-sm px-6 py-2 border-primary text-primary hover:bg-primary/10"
-              disabled={localPrintItems.length === 0}
-            >
-              <Download className="h-4 w-4" />
-              تحميل PDF
-            </Button>
-
-            <Button
-              onClick={() => handlePrint(true)}
-              variant="outline"
-              className="expenses-action-btn text-sm px-6 py-2"
-              disabled={localPrintItems.length === 0}
-            >
-              <Printer className="h-4 w-4" />
-              للطابعة (أوجه فقط)
-            </Button>
-
-            <Button
-              onClick={() => handleDownloadPDF(true)}
-              variant="outline"
-              className="expenses-action-btn text-sm px-6 py-2"
-              disabled={localPrintItems.length === 0}
-            >
-              <Download className="h-4 w-4" />
-              PDF (أوجه فقط)
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  className="text-sm px-5 py-2 gap-2 cursor-pointer transition-all bg-gradient-to-r from-primary to-primary-deep text-primary-foreground hover:opacity-90 shadow-md"
+                  disabled={localPrintItems.length === 0}
+                >
+                  <Printer className="h-4 w-4" />
+                  <span>خيارات الطباعة والتحميل</span>
+                  <ChevronDown className="h-4 w-4 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-60 z-[9999] bg-popover text-popover-foreground border border-border rounded-lg shadow-xl p-1.5" dir="rtl">
+                <DropdownMenuLabel className="text-right text-xs text-muted-foreground mb-1">خيارات الطباعة</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => handlePrint(false)} className="cursor-pointer gap-2 justify-end text-right hover:bg-accent rounded">
+                  <span>طباعة (مع الأسعار)</span>
+                  <Printer className="h-4 w-4 text-primary" />
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handlePrint(true)} className="cursor-pointer gap-2 justify-end text-right hover:bg-accent rounded">
+                  <span>طباعة للفرقة (أوجه فقط)</span>
+                  <Printer className="h-4 w-4 text-cyan-500" />
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="my-1.5" />
+                <DropdownMenuLabel className="text-right text-xs text-muted-foreground mb-1">تحميل ملفات PDF</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => handleDownloadPDF(false)} className="cursor-pointer gap-2 justify-end text-right hover:bg-accent rounded">
+                  <span>تحميل PDF (مع الأسعار)</span>
+                  <Download className="h-4 w-4 text-primary" />
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleDownloadPDF(true)} className="cursor-pointer gap-2 justify-end text-right hover:bg-accent rounded">
+                  <span>تحميل PDF (أوجه فقط)</span>
+                  <Download className="h-4 w-4 text-cyan-500" />
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>

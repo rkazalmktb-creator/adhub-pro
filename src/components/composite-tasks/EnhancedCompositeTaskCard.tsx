@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CompositeTaskWithDetails } from '@/types/composite-task';
-import { Wrench, Printer, Scissors, FileText, Edit, Eye, TrendingUp, FileOutput, Loader2, Trash2, Users, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Wrench, Printer, Scissors, FileText, Edit, Eye, TrendingUp, FileOutput, Loader2, Trash2, Users, AlertTriangle, RefreshCw, Pencil, Check, X as XIcon } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { CompositeProfitCard } from './CompositeProfitCard';
@@ -37,6 +38,10 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
 }) => {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState((task as any).task_name || '');
+  const [savingName, setSavingName] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [contractInfo, setContractInfo] = useState<{ adTypes?: { contractId: number; adType: string }[]; contractIds?: number[] } | null>(null);
   const [designImages, setDesignImages] = useState<Array<{ url: string; face: 'a' | 'b' }>>([]);
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false);
@@ -250,7 +255,6 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
     }
   };
 
-  const [calculatedInstallCost, setCalculatedInstallCost] = useState<number>(0);
 
   const openInvoice = (type: InvoiceType) => {
     setCurrentInvoiceType(type);
@@ -650,6 +654,58 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
                 <span> عقد #{task.contract_id}</span>
               )}
             </CardTitle>
+            {/* اسم المهمة مع إمكانية التعديل */}
+            {isEditingName ? (
+              <div className="flex items-center gap-2 mt-1">
+                <Input
+                  ref={nameInputRef}
+                  value={editedName}
+                  onChange={e => setEditedName(e.target.value)}
+                  placeholder="أدخل اسم المهمة..."
+                  className="h-8 text-sm max-w-[250px]"
+                  onKeyDown={async e => {
+                    if (e.key === 'Enter') {
+                      setSavingName(true);
+                      await supabase.from('composite_tasks').update({ task_name: editedName.trim() || null }).eq('id', task.id);
+                      setSavingName(false);
+                      setIsEditingName(false);
+                      toast.success('تم تحديث اسم المهمة');
+                    } else if (e.key === 'Escape') {
+                      setEditedName((task as any).task_name || '');
+                      setIsEditingName(false);
+                    }
+                  }}
+                  autoFocus
+                />
+                <button
+                  onClick={async () => {
+                    setSavingName(true);
+                    await supabase.from('composite_tasks').update({ task_name: editedName.trim() || null }).eq('id', task.id);
+                    setSavingName(false);
+                    setIsEditingName(false);
+                    toast.success('تم تحديث اسم المهمة');
+                  }}
+                  disabled={savingName}
+                  className="p-1.5 rounded-md hover:bg-emerald-500/10 text-emerald-500 transition-colors"
+                >
+                  {savingName ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                </button>
+                <button
+                  onClick={() => { setEditedName((task as any).task_name || ''); setIsEditingName(false); }}
+                  className="p-1.5 rounded-md hover:bg-red-500/10 text-red-500 transition-colors"
+                >
+                  <XIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsEditingName(true)}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mt-1 group/name cursor-pointer"
+              >
+                <Pencil className="h-3 w-3 opacity-0 group-hover/name:opacity-100 transition-opacity" />
+                <span>{(task as any).task_name || 'انقر لإضافة اسم للمهمة...'}</span>
+              </button>
+            )
             <div className="flex gap-2 flex-wrap">
               {getTaskTypeBadge(task.task_type)}
               {getStatusBadge(task.status)}

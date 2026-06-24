@@ -380,13 +380,20 @@ export default function CustomerBilling() {
 
         // جلب جميع فواتير مهام الطباعة المجمعة للزبون
         if (customerId) {
+          const compositePrintTaskIds = new Set(
+            (compositeTasksData || []).map((task: any) => String(task?.print_task_id || '')).filter(Boolean)
+          );
+          const compositeCutoutTaskIds = new Set(
+            (compositeTasksData || []).map((task: any) => String(task?.cutout_task_id || '')).filter(Boolean)
+          );
+
           const { data: printTasks } = await supabase
             .from('print_tasks')
-            .select('invoice_id')
-            .eq('customer_id', customerId)
-            .or('is_composite.eq.true,installation_task_id.not.is.null,composite_task_id.not.is.null');
+            .select('id, invoice_id, composite_task_id')
+            .eq('customer_id', customerId);
 
           (printTasks || [])
+            .filter((t: any) => compositePrintTaskIds.has(String(t.id)) || t.composite_task_id)
             .map((t: any) => t.invoice_id)
             .filter(Boolean)
             .forEach((id: string) => excludedInvoiceIds.add(id));
@@ -394,33 +401,40 @@ export default function CustomerBilling() {
           // جلب جميع فواتير مهام القص المجمعة للزبون
           const { data: cutoutTasks } = await supabase
             .from('cutout_tasks')
-            .select('invoice_id')
-            .eq('customer_id', customerId)
-            .or('is_composite.eq.true,installation_task_id.not.is.null');
+            .select('id, invoice_id')
+            .eq('customer_id', customerId);
 
           (cutoutTasks || [])
+            .filter((t: any) => compositeCutoutTaskIds.has(String(t.id)))
             .map((t: any) => t.invoice_id)
             .filter(Boolean)
             .forEach((id: string) => excludedInvoiceIds.add(id));
         } else if (customerName) {
+          const compositePrintTaskIds = new Set(
+            (compositeTasksData || []).map((task: any) => String(task?.print_task_id || '')).filter(Boolean)
+          );
+          const compositeCutoutTaskIds = new Set(
+            (compositeTasksData || []).map((task: any) => String(task?.cutout_task_id || '')).filter(Boolean)
+          );
+
           const { data: printTasks } = await supabase
             .from('print_tasks')
-            .select('invoice_id')
-            .eq('customer_name', customerName)
-            .or('is_composite.eq.true,installation_task_id.not.is.null,composite_task_id.not.is.null');
+            .select('id, invoice_id, composite_task_id')
+            .eq('customer_name', customerName);
 
           (printTasks || [])
+            .filter((t: any) => compositePrintTaskIds.has(String(t.id)) || t.composite_task_id)
             .map((t: any) => t.invoice_id)
             .filter(Boolean)
             .forEach((id: string) => excludedInvoiceIds.add(id));
 
           const { data: cutoutTasks } = await supabase
             .from('cutout_tasks')
-            .select('invoice_id')
-            .eq('customer_name', customerName)
-            .or('is_composite.eq.true,installation_task_id.not.is.null');
+            .select('id, invoice_id')
+            .eq('customer_name', customerName);
 
           (cutoutTasks || [])
+            .filter((t: any) => compositeCutoutTaskIds.has(String(t.id)))
             .map((t: any) => t.invoice_id)
             .filter(Boolean)
             .forEach((id: string) => excludedInvoiceIds.add(id));

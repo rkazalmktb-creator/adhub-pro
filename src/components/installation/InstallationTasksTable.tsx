@@ -1020,7 +1020,8 @@ export const InstallationTasksTable: React.FC<Props> = ({
         String(t.contract_id).includes(s) ||
         t.designName.toLowerCase().includes(s) ||
         t.team?.team_name?.toLowerCase().includes(s) ||
-        t.id.toLowerCase().includes(s)
+        t.id.toLowerCase().includes(s) ||
+        ((t as any).task_name || '').toLowerCase().includes(s)
       );
     }
     return r;

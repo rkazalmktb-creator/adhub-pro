@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { useSendWhatsApp } from '@/hooks/useSendWhatsApp';
+import { calculateTotalRemainingDebt, filterCompositeRelatedPrintedInvoices } from '@/components/billing/BillingUtils';
 
 interface UnpaidInvoice {
   invoiceId: string;
@@ -21,6 +22,8 @@ interface UnpaidInvoice {
   createdAt: string;
   daysOverdue: number;
   adType?: string;
+  type: 'printed' | 'sales' | 'composite';
+  invoiceNumber?: string;
 }
 
 interface CustomerAccountOverdue {
@@ -53,19 +56,42 @@ export default function AccountOverduePayments() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const { data: invoices, error } = await supabase
-        .from('printed_invoices')
-        .select(`id, contract_number, customer_name, customer_id, total_amount, created_at, paid`)
-        .eq('paid', false);
+      const [initialPrintedRes, initialSalesRes, initialCompositeRes] = await Promise.all([
+        supabase
+          .from('printed_invoices')
+          .select(`id, contract_number, customer_name, customer_id, total_amount, created_at, paid`)
+          .eq('paid', false),
+        supabase
+          .from('sales_invoices')
+          .select(`id, invoice_number, customer_name, customer_id, total_amount, remaining_amount, paid_amount, created_at, invoice_date, paid`)
+          .eq('paid', false),
+        supabase
+          .from('composite_tasks')
+          .select(`id, task_number, customer_name, customer_id, customer_total, paid_amount, discount_amount, created_at, status, contract_id, combined_invoice_id`)
+          .is('combined_invoice_id', null)
+          .neq('status', 'cancelled')
+      ]);
 
-      if (error) {
-        console.error('Error loading unpaid invoices:', error);
-        toast.error('خطأ في تحميل البيانات');
+      if (initialPrintedRes.error) {
+        console.error('Error loading unpaid printed invoices:', initialPrintedRes.error);
+        toast.error('خطأ في تحميل فواتير الطباعة');
+        return;
+      }
+      if (initialSalesRes.error) {
+        console.error('Error loading unpaid sales invoices:', initialSalesRes.error);
+        toast.error('خطأ في تحميل فواتير المبيعات');
+        return;
+      }
+      if (initialCompositeRes.error) {
+        console.error('Error loading composite tasks:', initialCompositeRes.error);
+        toast.error('خطأ في تحميل المهام المجمعة');
         return;
       }
 
+      const invoices = initialPrintedRes.data || [];
+
       // ✅ جلب خصومات المهام المجمعة المرتبطة بهذه الفواتير
-      const invoiceIds = (invoices || []).map((i: any) => i.id);
+      const invoiceIds = invoices.map((i: any) => i.id);
       const ctDiscountByInvoice = new Map<string, number>();
       const ctByInvoice = new Map<string, { customerTotal: number; paid: number; discount: number }>();
       if (invoiceIds.length) {
@@ -110,9 +136,12 @@ export default function AccountOverduePayments() {
         }
       }
 
-      // جلب أنواع الإعلانات من جدول العقود بشكل منفصل
+      // جلب أنواع الإعلانات من جدول العقود بشكل منفصل (تشمل عقود فواتير الطباعة وعقود المهام المجمعة)
       const contractNumbers = Array.from(
-        new Set((invoices || []).map((i: any) => i.contract_number).filter((n: any) => n != null))
+        new Set([
+          ...invoices.map((i: any) => i.contract_number),
+          ...(initialCompositeRes.data || []).map((ct: any) => ct.contract_id)
+        ].filter((n: any) => n != null))
       );
       const adTypeMap = new Map<number, string>();
       if (contractNumbers.length) {
@@ -128,12 +157,12 @@ export default function AccountOverduePayments() {
       const today = new Date();
       const map = new Map<string, CustomerAccountOverdue>();
 
-      for (const inv of invoices || []) {
+      // 1. إضافة فواتير الطباعة
+      for (const inv of invoices) {
         const createdAt = inv.created_at as string;
         const diffDays = Math.ceil((today.getTime() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24));
         const rawAmount = Number(inv.total_amount) || 0;
         const ctDisc = ctDiscountByInvoice.get(inv.id) || 0;
-        // ✅ إذا كانت الفاتورة مرتبطة بمهمة مجمعة، استخدم متبقي المهمة الكاملة
         const ctInfo = ctByInvoice.get(inv.id);
         let effectiveAmount: number;
         if (ctInfo && ctInfo.customerTotal > 0) {
@@ -141,7 +170,6 @@ export default function AccountOverduePayments() {
         } else {
           effectiveAmount = Math.max(0, rawAmount - ctDisc);
         }
-        // تجاهل الفواتير التي أصبحت قيمتها صفراً بعد خصم المهمة المجمعة
         if (effectiveAmount <= 0.5) continue;
         const item: UnpaidInvoice = {
           invoiceId: inv.id,
@@ -152,6 +180,93 @@ export default function AccountOverduePayments() {
           createdAt,
           daysOverdue: diffDays,
           adType: inv.contract_number != null ? adTypeMap.get(Number(inv.contract_number)) : undefined,
+          type: 'printed',
+        };
+
+        const key = item.customerId || item.customerName;
+        if (!map.has(key)) {
+          map.set(key, {
+            customerId: item.customerId,
+            customerName: item.customerName,
+            totalOverdue: 0,
+            invoicesCount: 0,
+            oldestDate: item.createdAt,
+            oldestDaysOverdue: item.daysOverdue,
+            invoices: [],
+          });
+        }
+        const c = map.get(key)!;
+        c.invoices.push(item);
+        c.totalOverdue += item.amount;
+        c.invoicesCount += 1;
+        if (new Date(item.createdAt) < new Date(c.oldestDate)) {
+          c.oldestDate = item.createdAt;
+          c.oldestDaysOverdue = item.daysOverdue;
+        }
+      }
+
+      // 2. إضافة فواتير المبيعات
+      for (const sale of initialSalesRes.data || []) {
+        const createdAt = sale.invoice_date || sale.created_at || new Date().toISOString();
+        const diffDays = Math.ceil((today.getTime() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24));
+        const amount = Number(sale.remaining_amount ?? (Number(sale.total_amount) - Number(sale.paid_amount || 0))) || 0;
+        if (amount <= 0.5) continue;
+
+        const item: UnpaidInvoice = {
+          invoiceId: sale.id,
+          contractNumber: null,
+          customerName: sale.customer_name || 'غير معروف',
+          customerId: sale.customer_id,
+          amount: amount,
+          createdAt,
+          daysOverdue: diffDays,
+          type: 'sales',
+          invoiceNumber: sale.invoice_number || undefined,
+        };
+
+        const key = item.customerId || item.customerName;
+        if (!map.has(key)) {
+          map.set(key, {
+            customerId: item.customerId,
+            customerName: item.customerName,
+            totalOverdue: 0,
+            invoicesCount: 0,
+            oldestDate: item.createdAt,
+            oldestDaysOverdue: item.daysOverdue,
+            invoices: [],
+          });
+        }
+        const c = map.get(key)!;
+        c.invoices.push(item);
+        c.totalOverdue += item.amount;
+        c.invoicesCount += 1;
+        if (new Date(item.createdAt) < new Date(c.oldestDate)) {
+          c.oldestDate = item.createdAt;
+          c.oldestDaysOverdue = item.daysOverdue;
+        }
+      }
+
+      // 3. إضافة المهام المجمعة غير المسددة بالكامل
+      for (const ct of initialCompositeRes.data || []) {
+        const createdAt = ct.created_at as string;
+        const diffDays = Math.ceil((today.getTime() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24));
+        const total = Number(ct.customer_total) || 0;
+        const paid = Number(ct.paid_amount) || 0;
+        const discount = Number(ct.discount_amount) || 0;
+        const amount = Math.max(0, total - paid - discount);
+        if (amount <= 0.5) continue;
+
+        const item: UnpaidInvoice = {
+          invoiceId: ct.id,
+          contractNumber: ct.contract_id ? Number(ct.contract_id) : null,
+          customerName: ct.customer_name || 'غير معروف',
+          customerId: ct.customer_id,
+          amount: amount,
+          createdAt,
+          daysOverdue: diffDays,
+          adType: ct.contract_id != null ? adTypeMap.get(Number(ct.contract_id)) : undefined,
+          type: 'composite',
+          invoiceNumber: ct.task_number ? `مهمة #${ct.task_number}` : undefined,
         };
 
         const key = item.customerId || item.customerName;
@@ -182,14 +297,32 @@ export default function AccountOverduePayments() {
       const customerIds = result.map(r => r.customerId).filter((x): x is string => !!x);
       const remainingMap = new Map<string, number>();
       if (customerIds.length) {
-        const [contractsRes, paymentsRes, salesRes, printedRes, purchasesRes, discountsRes, compositeRes] = await Promise.all([
-          supabase.from('Contract').select('Total, customer_id').in('customer_id', customerIds),
-          supabase.from('customer_payments').select('customer_id, amount, entry_type, sales_invoice_id, printed_invoice_id, purchase_invoice_id').in('customer_id', customerIds),
+        const [
+          contractsRes,
+          paymentsRes,
+          salesRes,
+          printedRes,
+          purchasesRes,
+          discountsRes,
+          compositeRes,
+          printTasksRes,
+          cutoutTasksRes,
+          customersRes,
+          friendCompaniesRes,
+          friendRentalsRes
+        ] = await Promise.all([
+          supabase.from('Contract').select('Total, customer_id, Contract_Number, friend_rental_data, "Contract Date"').in('customer_id', customerIds),
+          supabase.from('customer_payments').select('customer_id, amount, entry_type, sales_invoice_id, printed_invoice_id, purchase_invoice_id, notes, distributed_payment_id').in('customer_id', customerIds),
           supabase.from('sales_invoices').select('customer_id, total_amount').in('customer_id', customerIds),
-          supabase.from('printed_invoices').select('customer_id, total_amount, included_in_contract').in('customer_id', customerIds),
+          supabase.from('printed_invoices').select('id, customer_id, total_amount, print_cost, included_in_contract, invoice_type').in('customer_id', customerIds),
           supabase.from('purchase_invoices').select('customer_id, total_amount, used_as_payment').in('customer_id', customerIds),
-          supabase.from('customer_general_discounts').select('customer_id, discount_value').in('customer_id', customerIds),
-          supabase.from('composite_tasks').select('customer_id, discount_amount').in('customer_id', customerIds),
+          supabase.from('customer_general_discounts').select('customer_id, discount_value').eq('status', 'active').in('customer_id', customerIds),
+          supabase.from('composite_tasks').select('id, customer_id, customer_total, combined_invoice_id, print_task_id, discount_amount').in('customer_id', customerIds),
+          supabase.from('print_tasks').select('id, customer_id, invoice_id, is_composite, installation_task_id, composite_task_id').in('customer_id', customerIds),
+          supabase.from('cutout_tasks').select('id, customer_id, invoice_id, is_composite, installation_task_id').in('customer_id', customerIds),
+          supabase.from('customers').select('id, name, linked_friend_company_id').in('id', customerIds),
+          supabase.from('friend_companies').select('id, name'),
+          supabase.from('friend_billboard_rentals').select('*')
         ]);
 
         const byCustomer = <T extends { customer_id: string | null }>(rows: T[] | null) => {
@@ -202,6 +335,7 @@ export default function AccountOverduePayments() {
           });
           return m;
         };
+
         const cMap = byCustomer((contractsRes.data as any[]) || []);
         const pMap = byCustomer((paymentsRes.data as any[]) || []);
         const sMap = byCustomer((salesRes.data as any[]) || []);
@@ -209,6 +343,12 @@ export default function AccountOverduePayments() {
         const puMap = byCustomer((purchasesRes.data as any[]) || []);
         const dMap = byCustomer((discountsRes.data as any[]) || []);
         const ctMap = byCustomer((compositeRes.data as any[]) || []);
+        const ptMap = byCustomer((printTasksRes.data as any[]) || []);
+        const coMap = byCustomer((cutoutTasksRes.data as any[]) || []);
+
+        const customersList = customersRes.data || [];
+        const friendCompaniesList = friendCompaniesRes.data || [];
+        const friendRentalsList = friendRentalsRes.data || [];
 
         for (const cid of customerIds) {
           const contracts = cMap.get(cid) || [];
@@ -218,28 +358,117 @@ export default function AccountOverduePayments() {
           const purchases = puMap.get(cid) || [];
           const discounts = dMap.get(cid) || [];
           const composites = ctMap.get(cid) || [];
+          const printTasks = ptMap.get(cid) || [];
+          const cutoutTasks = coMap.get(cid) || [];
 
-          const totalContracts = contracts.reduce((s: number, c: any) => s + (Number(c.Total) || 0), 0);
-          const totalSales = sales.reduce((s: number, i: any) => s + (Number(i.total_amount) || 0), 0);
-          const totalPrinted = printed.reduce((s: number, i: any) => {
-            if (i.included_in_contract === true) return s;
-            return s + (Number(i.total_amount) || 0);
-          }, 0);
-          const otherDebts = payments.reduce((s: number, p: any) => {
-            const isDebt = p.entry_type === 'invoice' || p.entry_type === 'debt' || p.entry_type === 'general_debit';
-            const isLinked = p.sales_invoice_id || p.printed_invoice_id || p.purchase_invoice_id;
-            return isDebt && !isLinked ? s + (Number(p.amount) || 0) : s;
-          }, 0);
-          const totalPaid = payments.reduce((s: number, p: any) => {
-            const isCredit = p.entry_type === 'receipt' || p.entry_type === 'account_payment' || p.entry_type === 'payment' || p.entry_type === 'general_credit';
-            return isCredit ? s + (Number(p.amount) || 0) : s;
-          }, 0);
-          const totalDiscounts = discounts.reduce((s: number, d: any) => s + (Number(d.discount_value) || 0), 0);
-          const totalCompositeDiscounts = composites.reduce((s: number, c: any) => s + (Number(c.discount_amount) || 0), 0);
-          const totalPurchases = purchases.reduce((s: number, i: any) => s + Math.max(0, (Number(i.total_amount) || 0) - (Number(i.used_as_payment) || 0)), 0);
+          // حساب إيجارات الشركات الصديقة
+          let friendRentals = 0;
+          const addedFriendBillboardRentals = new Set<string>();
+          const addedFriendRentalGroups = new Set<string>();
+          
+          const customerObj = customersList.find((c: any) => c.id === cid);
+          const linkedFriendCompanyId = customerObj?.linked_friend_company_id || null;
+          const friendCompany = friendCompaniesList.find((fc: any) => fc.id === linkedFriendCompanyId);
+          const linkedFriendCompanyName = friendCompany?.name || null;
 
-          const totalDebt = totalContracts + totalSales + totalPrinted + otherDebts;
-          const remaining = totalDebt - totalPaid - totalDiscounts - totalCompositeDiscounts - totalPurchases;
+          if (linkedFriendCompanyId) {
+            // 1. إضافة من جدول friend_billboard_rentals
+            const dbFriendRentals = friendRentalsList.filter((r: any) => r.friend_company_id === linkedFriendCompanyId);
+            dbFriendRentals.forEach((rental: any) => {
+              const rentalCost = Number(rental.friend_rental_cost) || Number(rental.customer_rental_price) || 0;
+              const usedAsPayment = Number(rental.used_as_payment) || 0;
+              const remainingAmount = Math.max(0, rentalCost - usedAsPayment);
+              
+              if (remainingAmount > 0) {
+                friendRentals += remainingAmount;
+                const contractNum = Number(rental.contract_number);
+                const startDate = rental.start_date || '';
+                const billboardId = rental.billboard_id;
+                
+                if (contractNum && billboardId) {
+                  addedFriendBillboardRentals.add(`${Number(contractNum)}_${String(billboardId).trim()}`);
+                }
+                if (contractNum && !isNaN(contractNum)) {
+                  addedFriendRentalGroups.add(`${contractNum}_${startDate}`);
+                }
+              }
+            });
+            
+            // 2. إضافة من JSON العقود (مع التصفية والدبلرة)
+            if (linkedFriendCompanyName) {
+              for (const contract of contracts) {
+                const friendData = contract.friend_rental_data as any;
+                if (friendData) {
+                  const items = typeof friendData === 'string' ? (() => { try { return JSON.parse(friendData); } catch { return []; } })() : friendData;
+                  
+                  const groupedByDate = new Map<string, number>();
+
+                  const processItem = (cost: number, name: string | null, startDate: string, billboardId: any) => {
+                    if (!name || name.trim() !== linkedFriendCompanyName.trim()) return;
+                    
+                    const isAlreadyAdded = billboardId && addedFriendBillboardRentals.has(`${Number(contract.Contract_Number)}_${String(billboardId).trim()}`);
+                    if (isAlreadyAdded) return;
+                    
+                    const currentSum = groupedByDate.get(startDate) || 0;
+                    groupedByDate.set(startDate, currentSum + cost);
+                  };
+
+                  if (Array.isArray(items)) {
+                    for (const item of items) {
+                      const cost = Number(item.friendRentalCost || item.friend_rental_cost || 0);
+                      if (cost > 0) {
+                        const name = item.friendCompanyName || item.friend_company_name || null;
+                        const startDate = item.startDate || item.start_date || contract['Contract Date'] || '';
+                        const bId = item.billboardId || item.billboard_id || null;
+                        processItem(cost, name, startDate, bId);
+                      }
+                    }
+                  } else if (typeof items === 'object') {
+                    const entries = Object.entries(items) as [string, any][];
+                    for (const [bId, entry] of entries) {
+                      if (entry && typeof entry.rental_cost === 'number' && entry.rental_cost > 0) {
+                        const name = entry.company_name || null;
+                        const startDate = entry.startDate || entry.start_date || contract['Contract Date'] || '';
+                        processItem(entry.rental_cost, name, startDate, bId);
+                      }
+                    }
+                  }
+
+                  // إضافة التكاليف المجمعة لكل تاريخ بدء
+                  groupedByDate.forEach((totalCost, startDate) => {
+                    const groupKey = `${contract.Contract_Number}_${startDate}`;
+                    if (totalCost > 0 && !addedFriendRentalGroups.has(groupKey)) {
+                      friendRentals += totalCost;
+                      addedFriendRentalGroups.add(groupKey);
+                    }
+                  });
+                }
+              }
+            }
+          }
+
+          // تصفية فواتير الطباعة التابعة للمهام المجمعة لتفادي الازدواجية
+          const billablePrintedInvoices = filterCompositeRelatedPrintedInvoices(
+            printed,
+            composites,
+            printTasks,
+            cutoutTasks
+          );
+
+          const totalDiscounts = discounts.reduce((sum: number, d: any) => sum + (Number(d.discount_value) || 0), 0);
+
+          // حساب المتبقي الإجمالي المعياري الصحيح
+          const remaining = calculateTotalRemainingDebt(
+            contracts,
+            payments,
+            sales,
+            billablePrintedInvoices,
+            purchases,
+            totalDiscounts,
+            composites,
+            friendRentals
+          );
+
           remainingMap.set(cid, remaining);
         }
       }
@@ -306,19 +535,57 @@ export default function AccountOverduePayments() {
     const phone = getPhone(inv);
     if (!phone) { toast.error('لا يوجد رقم هاتف مسجل لهذا الزبون'); return; }
     const dateStr = new Date(inv.createdAt).toLocaleDateString('ar-LY');
-    const message = `السلام عليكم ورحمة الله\n\nالسيد/ ${inv.customerName} المحترم،\n\nنود تذكيركم بفاتورة غير مسددة:\n- تاريخ الإصدار: ${dateStr}\n- أيام التأخير: ${inv.daysOverdue} يوم\n- المبلغ: ${inv.amount.toLocaleString('en-US')} د.ل${inv.contractNumber ? `\n- عقد رقم: #${inv.contractNumber}` : ''}\n\nنرجو المبادرة بالسداد.\n\nشكراً لتعاونكم.`;
+    let typeName = 'فاتورة غير مسددة';
+    let docRef = '';
+    if (inv.type === 'printed') {
+      typeName = 'فاتورة طباعة غير مسددة';
+      if (inv.contractNumber) docRef = `\n- عقد رقم: #${inv.contractNumber}`;
+    } else if (inv.type === 'sales') {
+      typeName = 'فاتورة مبيعات غير مسددة';
+      if (inv.invoiceNumber) docRef = `\n- رقم الفاتورة: ${inv.invoiceNumber}`;
+    } else if (inv.type === 'composite') {
+      typeName = 'مهمة مجمعة غير مسددة';
+      if (inv.invoiceNumber) docRef = `\n- مرجع المهمة: ${inv.invoiceNumber}`;
+      if (inv.contractNumber) docRef += `\n- عقد رقم: #${inv.contractNumber}`;
+    }
+    const message = `السلام عليكم ورحمة الله\n\nالسيد/ ${inv.customerName} المحترم،\n\nنود تذكيركم بـ ${typeName}:\n- تاريخ الإصدار: ${dateStr}\n- أيام التأخير: ${inv.daysOverdue} يوم\n- المبلغ: ${inv.amount.toLocaleString('en-US')} د.ل${docRef}\n\nنرجو المبادرة بالسداد.\n\nشكراً لتعاونكم.`;
     await sendWhatsApp({ phone, message });
   };
 
-  const markInvoicePaid = async (invoiceId: string) => {
+  const markItemPaid = async (item: UnpaidInvoice) => {
     try {
-      const { error } = await supabase.from('printed_invoices').update({ paid: true }).eq('id', invoiceId);
-      if (error) throw error;
-      toast.success('تم تسديد الفاتورة بنجاح');
+      if (item.type === 'printed') {
+        const { error } = await supabase.from('printed_invoices').update({ paid: true }).eq('id', item.invoiceId);
+        if (error) throw error;
+      } else if (item.type === 'sales') {
+        const { error } = await supabase
+          .from('sales_invoices')
+          .update({ paid: true, remaining_amount: 0 })
+          .eq('id', item.invoiceId);
+        if (error) throw error;
+      } else if (item.type === 'composite') {
+        const { data: ct, error: getError } = await supabase
+          .from('composite_tasks')
+          .select('customer_total, discount_amount')
+          .eq('id', item.invoiceId)
+          .single();
+        if (getError) throw getError;
+        
+        const total = Number(ct.customer_total) || 0;
+        const discount = Number(ct.discount_amount) || 0;
+        const targetPaid = Math.max(0, total - discount);
+        
+        const { error } = await supabase
+          .from('composite_tasks')
+          .update({ paid_amount: targetPaid })
+          .eq('id', item.invoiceId);
+        if (error) throw error;
+      }
+      toast.success('تم تسديد البند بنجاح');
       loadData();
     } catch (e) {
       console.error(e);
-      toast.error('خطأ في تسديد الفاتورة');
+      toast.error('خطأ في تسديد البند');
     }
   };
 
@@ -575,7 +842,15 @@ export default function AccountOverduePayments() {
                               {invoice.adType && (
                                 <Badge variant="secondary" className="text-[10px] font-bold px-2 py-0">{invoice.adType}</Badge>
                               )}
-                              <Badge variant="outline" className="text-[10px] font-bold bg-orange-500/10 text-orange-700 border-orange-500/20 px-2 py-0">فاتورة طباعة</Badge>
+                              {invoice.type === 'printed' && (
+                                <Badge variant="outline" className="text-[10px] font-bold bg-orange-500/10 text-orange-700 border-orange-500/20 px-2 py-0">فاتورة طباعة</Badge>
+                              )}
+                              {invoice.type === 'sales' && (
+                                <Badge variant="outline" className="text-[10px] font-bold bg-blue-500/10 text-blue-700 border-blue-500/20 px-2 py-0">فاتورة مبيعات {invoice.invoiceNumber ? `(${invoice.invoiceNumber})` : ''}</Badge>
+                              )}
+                              {invoice.type === 'composite' && (
+                                <Badge variant="outline" className="text-[10px] font-bold bg-purple-500/10 text-purple-700 border-purple-500/20 px-2 py-0">مهمة مجمعة {invoice.invoiceNumber ? `(${invoice.invoiceNumber})` : ''}</Badge>
+                              )}
                               {getUrgencyBadge(invoice.daysOverdue)}
                             </div>
                             <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground pt-1">
@@ -587,7 +862,7 @@ export default function AccountOverduePayments() {
                             <Button
                               size="sm"
                               className="h-9 flex-1 sm:flex-none font-semibold bg-green-600 hover:bg-green-700 text-white shadow-sm transition-colors gap-1.5"
-                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); markInvoicePaid(invoice.invoiceId); }}
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); markItemPaid(invoice); }}
                             >
                               <CreditCard className="h-3.5 w-3.5" /> تسديد الفاتورة
                             </Button>

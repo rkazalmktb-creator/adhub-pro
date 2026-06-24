@@ -99,6 +99,7 @@ interface EnhancedAddInstallationTaskDialogProps {
     customerId: string | null;
     billboardIds: number[];
     teamAssignments: TeamAssignment[];
+    task_name?: string;
   }) => void;
   isSubmitting: boolean;
   teams: InstallationTeam[];
@@ -115,6 +116,7 @@ export function EnhancedAddInstallationTaskDialog({
 }: EnhancedAddInstallationTaskDialogProps) {
   // Wizard Step State
   const [currentStep, setCurrentStep] = useState(1);
+  const [taskName, setTaskName] = useState('');
 
   // Customer selection
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
@@ -143,6 +145,7 @@ export function EnhancedAddInstallationTaskDialog({
   useEffect(() => {
     if (!open) {
       setCurrentStep(1);
+      setTaskName('');
       setCustomerSearchTerm('');
       setCustomerAdTypeSearch('');
       setSelectedCustomerId(null);
@@ -596,7 +599,8 @@ export function EnhancedAddInstallationTaskDialog({
       contractIds: selectedContractIds,
       customerId: selectedCustomerId,
       billboardIds: selectedBillboardIds,
-      teamAssignments
+      teamAssignments,
+      task_name: taskName
     });
   };
 
@@ -721,6 +725,20 @@ export function EnhancedAddInstallationTaskDialog({
             {/* ================= STEP 1: Customer & Contracts Selection ================= */}
             {currentStep === 1 && (
               <div className="space-y-5">
+                {/* Task Name Section */}
+                <div className="space-y-2">
+                  <Label className="text-xs font-extrabold flex items-center gap-2 text-foreground/80">
+                    <FileText className="h-4.5 w-4.5 text-primary" />
+                    اسم مهمة التركيب (اختياري)
+                  </Label>
+                  <Input
+                    placeholder="أدخل اسماً مميزاً للمهمة (مثال: تركيب لوحات طريق المطار)..."
+                    value={taskName}
+                    onChange={(e) => setTaskName(e.target.value)}
+                    className="h-11 text-xs rounded-xl border-border/80 bg-background/50 hover:bg-background/80 focus-visible:ring-primary transition-all text-right"
+                  />
+                </div>
+
                 {/* Customer Search Section */}
                 <div className="space-y-2.5">
                   <Label className="text-xs font-extrabold flex items-center gap-2 text-foreground/80">

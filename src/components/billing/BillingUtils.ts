@@ -14,12 +14,14 @@ export const filterCompositeRelatedPrintedInvoices = (
     compositeTasks.map((task) => String(task?.print_task_id || '')).filter(Boolean)
   );
 
+  const compositeCutoutTaskIds = new Set(
+    compositeTasks.map((task) => String(task?.cutout_task_id || '')).filter(Boolean)
+  );
+
   const compositePrintInvoiceIds = new Set(
     printTasks
       .filter((task) => 
         compositePrintTaskIds.has(String(task?.id || '')) || 
-        task?.is_composite === true || 
-        task?.installation_task_id || 
         task?.composite_task_id
       )
       .map((task) => String(task?.invoice_id || ''))
@@ -29,8 +31,7 @@ export const filterCompositeRelatedPrintedInvoices = (
   // Add cutout task invoice IDs to exclude
   cutoutTasks
     .filter((task) => 
-      task?.is_composite === true || 
-      task?.installation_task_id
+      compositeCutoutTaskIds.has(String(task?.id || ''))
     )
     .map((task) => String(task?.invoice_id || ''))
     .filter(Boolean)

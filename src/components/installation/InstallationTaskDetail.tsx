@@ -16,8 +16,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { BillboardTaskCard } from '@/components/tasks/BillboardTaskCard';
-import { TaskTotalCostSummary } from '@/components/tasks/TaskTotalCostSummary';
+import { AllInstallationsSummary } from './AllInstallationsSummary';
 import ImageLightbox from '@/components/Map/ImageLightbox';
+import { cn } from '@/lib/utils';
 // Calendar and Popover kept for potential future use
 
 interface Props {
@@ -59,6 +60,7 @@ interface Props {
   onRefreshItems: () => void;
   isMergedTask: boolean;
   onDuplicateAsReinstallation?: () => void;
+  onSwitchTask?: (taskId: string) => void;
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
@@ -115,6 +117,7 @@ export const InstallationTaskDetail: React.FC<Props> = ({
   onRefreshItems,
   isMergedTask,
   onDuplicateAsReinstallation,
+  onSwitchTask,
 }) => {
   // استخدام derivedContractIds لتحديد العقود الفعلية للمهمة
   const effectiveContractIds = derivedContractIds && derivedContractIds.length > 0
@@ -132,6 +135,55 @@ export const InstallationTaskDetail: React.FC<Props> = ({
   }, 0);
   const designImage = taskDesigns[0]?.design_face_a_url || taskItems.find(i => i.design_face_a)?.design_face_a;
   const firstInstallDate = taskItems.find(i => i.installation_date)?.installation_date;
+
+  // Naming & Siblings states
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState(task.task_name || '');
+  const [siblingTasks, setSiblingTasks] = useState<any[]>([]);
+  const [loadingSiblings, setLoadingSiblings] = useState(false);
+
+  useEffect(() => {
+    setTempName(task.task_name || '');
+  }, [task.task_name]);
+
+  useEffect(() => {
+    if (!effectiveContractIds || effectiveContractIds.length === 0) return;
+    const fetchSiblings = async () => {
+      setLoadingSiblings(true);
+      try {
+        const { data, error } = await supabase
+          .from('installation_tasks')
+          .select('id, task_type, task_name, contract_id, reinstallation_number, created_at, status, team_id, installation_teams!installation_tasks_team_id_fkey(team_name)')
+          .in('contract_id', effectiveContractIds)
+          .order('created_at', { ascending: true });
+        
+        if (!error && data) {
+          setSiblingTasks(data);
+        }
+      } catch (err) {
+        console.error('Error fetching sibling tasks:', err);
+      } finally {
+        setLoadingSiblings(false);
+      }
+    };
+    fetchSiblings();
+  }, [task.contract_id, task.id, JSON.stringify(effectiveContractIds)]);
+
+  const handleSaveName = async () => {
+    try {
+      const { error } = await supabase
+        .from('installation_tasks')
+        .update({ task_name: tempName })
+        .eq('id', task.id);
+      if (error) throw error;
+      toast.success('تم تحديث اسم مهمة التركيب');
+      setIsEditingName(false);
+      onRefreshItems();
+    } catch (err) {
+      console.error('Error saving task name:', err);
+      toast.error('فشل في حفظ الاسم');
+    }
+  };
 
   const [printBillboardIds, setPrintBillboardIds] = useState<Set<number>>(new Set());
 
@@ -347,7 +399,7 @@ export const InstallationTaskDetail: React.FC<Props> = ({
           <ArrowRight className="h-4 w-4 text-primary dark:text-white" />
           العودة
         </Button>
-        <div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground flex-wrap">
           <span className="text-muted-foreground/60">مهام التركيب</span>
           <span className="text-muted-foreground/30">/</span>
           <span className="font-bold text-foreground truncate max-w-[200px]">
@@ -355,6 +407,42 @@ export const InstallationTaskDetail: React.FC<Props> = ({
           </span>
           <span className="text-muted-foreground/30">/</span>
           <span className="text-xs font-mono text-muted-foreground/50 bg-muted px-2 py-0.5 rounded-lg border border-border/20">#{task.id.slice(0, 8)}</span>
+          <span className="text-muted-foreground/30">/</span>
+          {/* Inline Edit for Task Name */}
+          {isEditingName ? (
+            <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+              <Input
+                value={tempName}
+                onChange={(e) => setTempName(e.target.value)}
+                className="h-8.5 text-xs rounded-xl bg-background border-primary/40 text-right w-36 px-2.5"
+                placeholder="اسم المهمة..."
+                autoFocus
+              />
+              <Button size="sm" onClick={handleSaveName} className="h-8 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 rounded-xl">حفظ</Button>
+              <Button size="sm" variant="ghost" onClick={() => setIsEditingName(false)} className="h-8 w-8 p-0 rounded-xl">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1">
+              {task.task_name ? (
+                <span className="font-extrabold text-primary border border-primary/20 bg-primary/5 px-2.5 py-0.5 rounded-xl text-xs">
+                  {task.task_name}
+                </span>
+              ) : (
+                <span className="text-xs text-muted-foreground/55 italic">بدون اسم</span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => { setTempName(task.task_name || ''); setIsEditingName(true); }}
+                className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg shrink-0 cursor-pointer"
+                title="تسمية المهمة"
+              >
+                <Edit className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
         </div>
 
         <div className="mr-auto flex items-center gap-2">
@@ -430,6 +518,79 @@ export const InstallationTaskDetail: React.FC<Props> = ({
             <p className="text-xs text-muted-foreground mt-1.5">
               {completedItems} من {taskItems.length} لوحة مكتملة
             </p>
+          </div>
+
+          {/* Sibling Tasks / Installation History */}
+          <div className="p-4 border-b border-border shrink-0 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">عمليات تركيب العقد</h3>
+              {onDuplicateAsReinstallation && (
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={onDuplicateAsReinstallation} 
+                  className="h-6 w-6 text-primary hover:bg-primary/10 rounded-lg cursor-pointer"
+                  title="تكرار كإعادة تركيب جديدة"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+
+            {loadingSiblings ? (
+              <div className="text-center py-2 text-xs text-muted-foreground">جاري التحميل...</div>
+            ) : siblingTasks.length <= 1 ? (
+              <div className="text-[11px] text-muted-foreground bg-muted/40 p-2.5 rounded-xl border border-border/10 text-right leading-relaxed">
+                لا توجد عمليات إعادة تركيب مسجلة لهذا العقد حالياً.
+              </div>
+            ) : (
+              <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                {siblingTasks.map((t) => {
+                  const isActive = t.id === task.id;
+                  const isRe = t.task_type === 'reinstallation';
+                  const label = isRe 
+                    ? `إعادة تركيب #${t.reinstallation_number || 1}` 
+                    : 'التركيبة الأولى';
+                  const taskStatus = STATUS_CONFIG[t.status || 'pending'];
+                  
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => onSwitchTask && onSwitchTask(t.id)}
+                      disabled={isActive}
+                      className={cn(
+                        "w-full p-2.5 rounded-xl border text-right transition-all flex flex-col gap-1 hover:scale-[1.01] cursor-pointer",
+                        isActive
+                          ? "border-primary bg-primary/[0.04] cursor-default"
+                          : "border-border/60 bg-background/50 hover:bg-muted hover:border-primary/20"
+                      )}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className={cn("text-xs font-bold", isActive ? "text-primary" : "text-foreground")}>
+                          {label}
+                        </span>
+                        <span className={cn("text-[9px] px-2 py-0.5 rounded-full border font-semibold", taskStatus?.color)}>
+                          {taskStatus?.label || 'جديدة'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between w-full text-[10px] text-muted-foreground mt-0.5">
+                        <span className="truncate max-w-[120px]" title={t.installation_teams?.team_name}>
+                          {t.installation_teams?.team_name || 'بدون فريق'}
+                        </span>
+                        {t.created_at && (
+                          <span>{format(new Date(t.created_at), 'yyyy-MM-dd')}</span>
+                        )}
+                      </div>
+                      {t.task_name && (
+                        <div className="text-[9px] font-semibold text-primary/75 mt-0.5 truncate max-w-full">
+                          {t.task_name}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Client Info */}
@@ -540,23 +701,13 @@ export const InstallationTaskDetail: React.FC<Props> = ({
         <div className="flex-1 min-w-0 flex flex-col gap-4 p-4 lg:p-6">
 
           {/* Cost Summary Component */}
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-border">
-              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Wrench className="h-4 w-4 text-amber-400" />
-                ملخص تكاليف التركيب
-              </h2>
-            </div>
-            <div className="p-4">
-              <TaskTotalCostSummary
-                taskId={task.id}
-                taskItems={taskItems}
-                installationPrices={installationPricingByBillboard}
-                billboards={billboardById}
-                onRefresh={onRefreshItems}
-              />
-            </div>
-          </div>
+          <AllInstallationsSummary
+            siblingTasks={siblingTasks}
+            currentTaskId={task.id}
+            billboards={billboardById}
+            installationPrices={installationPricingByBillboard}
+            onRefresh={onRefreshItems}
+          />
 
           {/* Search Bar */}
           <div className="relative">

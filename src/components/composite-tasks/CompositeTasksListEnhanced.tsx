@@ -32,6 +32,7 @@ import { getContractWithBillboards } from '@/services/contractService';
 import { EnhancedEditCompositeTaskCostsDialog } from './EnhancedEditCompositeTaskCostsDialog';
 import { UnifiedTaskInvoice, InvoiceType } from './UnifiedTaskInvoice';
 import { CompositeTaskWithDetails, UpdateCompositeTaskCostsInput } from '@/types/composite-task';
+import { CreatePrintTaskFromInstallation } from '../tasks/CreatePrintTaskFromInstallation';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -217,15 +218,15 @@ const SkeletonCard = () => (
 );
 
 /* ── Task Card Row ── */
-/* ── Task Card Row ── */
 const TaskCardRow = ({
-  task, idx, onEditCosts, onDelete, onOpenInvoice, onNavigateToPayment,
+  task, idx, onEditCosts, onDelete, onOpenInvoice, onNavigateToPayment, onCreatePrintTask,
 }: {
   task: any; idx: number;
   onEditCosts: (task: any) => void;
   onDelete: (task: any) => void;
   onOpenInvoice: (task: any, type: InvoiceType) => void;
   onNavigateToPayment: (distributedPaymentId: string, customerId: string, customerName: string) => void;
+  onCreatePrintTask?: (installationTaskId: string) => void;
 }) => {
   const [dominantColor, setDominantColor] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -449,7 +450,18 @@ const TaskCardRow = ({
             ) : (
               <>
                 <ActionBtn icon={FileText} label="فاتورة الزبون" onClick={() => onOpenInvoice(task, 'customer')} />
-                {task.print_task_id && <ActionBtn icon={Printer} label="فاتورة المطبعة" onClick={() => onOpenInvoice(task, 'print_vendor')} />}
+                {task.print_task_id ? (
+                  <ActionBtn icon={Printer} label="فاتورة المطبعة" onClick={() => onOpenInvoice(task, 'print_vendor')} />
+                ) : (
+                  task.installation_task_id && (
+                    <ActionBtn 
+                      icon={Printer} 
+                      label="إنشاء مهمة طباعة" 
+                    onClick={() => onCreatePrintTask?.(task.installation_task_id)} 
+                      color="text-cyan-400 hover:text-cyan-300"
+                    />
+                  )
+                )}
                 {task.installation_task_id && <ActionBtn icon={Users} label="فاتورة الفرقة" onClick={() => onOpenInvoice(task, 'installation_team')} />}
                 <div className="w-6 h-px bg-border/40 my-0.5" />
                 <ActionBtn icon={Edit} label="تعديل التكاليف" onClick={() => onEditCosts(task)} />
@@ -556,7 +568,18 @@ const TaskCardRow = ({
         <div className="flex items-center justify-between pt-3 mt-1 border-t border-border/20 gap-2" onClick={e => e.stopPropagation()}>
           <div className="flex gap-1.5">
             <ActionBtn icon={FileText} label="فاتورة الزبون" onClick={() => onOpenInvoice(task, 'customer')} />
-            {task.print_task_id && <ActionBtn icon={Printer} label="فاتورة المطبعة" onClick={() => onOpenInvoice(task, 'print_vendor')} />}
+            {task.print_task_id ? (
+              <ActionBtn icon={Printer} label="فاتورة المطبعة" onClick={() => onOpenInvoice(task, 'print_vendor')} />
+            ) : (
+              task.installation_task_id && (
+                <ActionBtn 
+                  icon={Printer} 
+                  label="مهمة طباعة" 
+                  onClick={() => onCreatePrintTask?.(task.installation_task_id)} 
+                  color="text-cyan-400"
+                />
+              )
+            )}
             {task.installation_task_id && <ActionBtn icon={Users} label="فاتورة الفرقة" onClick={() => onOpenInvoice(task, 'installation_team')} />}
           </div>
           <div className="flex gap-1.5">
@@ -607,6 +630,77 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
   const [discountTarget, setDiscountTarget] = useState<'all' | string>('all');
   const [discountSaving, setDiscountSaving] = useState(false);
   const [zipDownloadingGroup, setZipDownloadingGroup] = useState<string | null>(null);
+
+  // State for Print Task Creation Dialog
+  const [createPrintDialogOpen, setCreatePrintDialogOpen] = useState(false);
+  const [selectedInstallTaskId, setSelectedInstallTaskId] = useState<string | null>(null);
+  const [selectedTaskItems, setSelectedTaskItems] = useState<any[]>([]);
+  const [fetchingItems, setFetchingItems] = useState(false);
+  const [printQueue, setPrintQueue] = useState<string[]>([]);
+
+  const handleOpenCreatePrintTask = async (installationTaskId: string) => {
+    setFetchingItems(true);
+    const tId = toast.loading('جاري تحميل بنود المهمة...');
+    try {
+      const { data, error } = await supabase
+        .from('installation_task_items')
+        .select('id, billboard_id, design_face_a, design_face_b, has_cutout, selected_design_id, faces_to_install')
+        .eq('task_id', installationTaskId);
+      
+      if (!error && data) {
+        setSelectedInstallTaskId(installationTaskId);
+        setSelectedTaskItems(data);
+        setCreatePrintDialogOpen(true);
+        toast.dismiss(tId);
+      } else {
+        toast.dismiss(tId);
+        toast.error('فشل في تحميل بنود مهمة التركيب');
+      }
+    } catch (err) {
+      console.error('Error fetching installation task items:', err);
+      toast.dismiss(tId);
+      toast.error('حدث خطأ أثناء تحميل البنود');
+    } finally {
+      setFetchingItems(false);
+    }
+  };
+
+  const processNextInPrintQueue = useCallback(async (currentQueue: string[]) => {
+    if (currentQueue.length === 0) {
+      setPrintQueue([]);
+      setSelectedInstallTaskId(null);
+      setSelectedTaskItems([]);
+      return;
+    }
+    const nextTaskId = currentQueue[0];
+    setPrintQueue(currentQueue.slice(1));
+    
+    // Fetch items
+    const { data } = await supabase
+      .from('installation_task_items')
+      .select('id, billboard_id, design_face_a, design_face_b, has_cutout, selected_design_id, faces_to_install')
+      .eq('task_id', nextTaskId);
+    
+    if (data && data.length > 0) {
+      setSelectedInstallTaskId(nextTaskId);
+      setSelectedTaskItems(data);
+      setCreatePrintDialogOpen(true);
+    } else {
+      // Skip this one and do next
+      processNextInPrintQueue(currentQueue.slice(1));
+    }
+  }, []);
+
+  const handleCreatePrintTasksForGroup = useCallback((tasks: any[]) => {
+    const tasksToCreate = tasks.filter(t => !t.print_task_id && t.installation_task_id);
+    if (tasksToCreate.length === 0) {
+      toast.info('جميع المهام في هذه التجميعة تحتوي بالفعل على مهام طباعة.');
+      return;
+    }
+    const queue = tasksToCreate.map(t => t.installation_task_id);
+    toast.info(`سيتم البدء في إنشاء مهام الطباعة لـ ${queue.length} مهمة...`);
+    processNextInPrintQueue(queue);
+  }, [processNextInPrintQueue]);
 
   const handleDownloadGroupZip = useCallback(async (group: { key: string; contractId: number; customerName: string }) => {
     if (zipDownloadingGroup) return;
@@ -1038,7 +1132,8 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       r = r.filter(t =>
         (t.customer_name || '').toLowerCase().includes(s) ||
         String(t.contract_id).includes(s) ||
-        (t.adType || '').toLowerCase().includes(s)
+        (t.adType || '').toLowerCase().includes(s) ||
+        ((t as any).task_name || '').toLowerCase().includes(s)
       );
     }
     return r;
@@ -1504,6 +1599,26 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
                         <TooltipContent>تحميل صور وCSV العقد كملف ZIP</TooltipContent>
                       </Tooltip>
 
+                      {/* إضافة مهمة طباعة لكل المهام */}
+                      {(() => {
+                        const tasksToCreate = group.tasks.filter((t: any) => !t.print_task_id && t.installation_task_id);
+                        if (tasksToCreate.length === 0) return null;
+                        return (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                onClick={() => handleCreatePrintTasksForGroup(group.tasks)}
+                                className="h-8.5 rounded-xl flex items-center gap-1.5 px-3 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all hover:scale-105 text-xs font-bold"
+                              >
+                                <Printer className="h-3.5 w-3.5 animate-pulse" />
+                                <span>إنشاء مهمة طباعة ({tasksToCreate.length})</span>
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">إنشاء مهمة طباعة للمهام غير المجهزة في التجميعة</TooltipContent>
+                          </Tooltip>
+                        );
+                      })()}
+
                       {/* Discount Popover */}
                       <Popover open={discountPopoverGroup === group.key} onOpenChange={(open) => {
                         if (open) {
@@ -1722,6 +1837,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
                               onNavigateToPayment={(distId, custId, custName) => {
                                 navigate(`/admin/customer-billing?id=${custId}&name=${encodeURIComponent(custName)}&highlight_payment=${distId}`);
                               }}
+                              onCreatePrintTask={handleOpenCreatePrintTask}
                             />
                           ))}
                         </div>
@@ -1794,6 +1910,36 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Create Print Task Dialog */}
+      {selectedInstallTaskId && (
+        <CreatePrintTaskFromInstallation
+          open={createPrintDialogOpen}
+          onOpenChange={(open) => {
+            setCreatePrintDialogOpen(open);
+            if (!open) {
+              // If there are more in the queue, process them after a short delay
+              if (printQueue.length > 0) {
+                setTimeout(() => processNextInPrintQueue(printQueue), 500);
+              } else {
+                setSelectedInstallTaskId(null);
+                setSelectedTaskItems([]);
+              }
+            }
+          }}
+          installationTaskId={selectedInstallTaskId}
+          taskItems={selectedTaskItems}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ['composite-tasks'] });
+            queryClient.invalidateQueries({ queryKey: ['composite-task-extras'] });
+            queryClient.invalidateQueries({ queryKey: ['composite-task-payments'] });
+            // Process next item in queue if any
+            if (printQueue.length > 0) {
+              setTimeout(() => processNextInPrintQueue(printQueue), 500);
+            }
+          }}
+        />
+      )}
     </TooltipProvider>
   );
 };
