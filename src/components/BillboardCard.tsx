@@ -94,7 +94,7 @@ export const BillboardGridCard: React.FC<BillboardGridCardProps> = ({
         const today = new Date().toISOString().split('T')[0];
         const { data: contractData } = await supabase
           .from('Contract')
-          .select('Contract_Number, "Customer Name", "Ad Type", "Contract Date", "End Date", billboard_ids')
+          .select('Contract_Number, "Customer Name", "Ad Type", "Contract Date", "End Date", billboard_ids, billboard_prices')
           .or(`billboard_ids.ilike."%25,${idStr},%25",billboard_ids.ilike."${idStr},%25",billboard_ids.ilike."%25,${idStr}",billboard_ids.eq.${idStr}`)
           .gte('"End Date"', today)
           .order('"End Date"', { ascending: false })
@@ -181,10 +181,29 @@ export const BillboardGridCard: React.FC<BillboardGridCardProps> = ({
   
   // استخدام بيانات العقد الساري (من البحث في billboard_ids) أو البيانات المباشرة
   const contractInfo = billboard.contract;
+  
+  // جلب التواريخ المخصصة للوحة إن وجدت
+  let customStartDate = '';
+  let customEndDate = '';
+  if (activeContract?.billboard_prices) {
+    try {
+      const prices = typeof activeContract.billboard_prices === 'string'
+        ? JSON.parse(activeContract.billboard_prices)
+        : activeContract.billboard_prices;
+      if (Array.isArray(prices)) {
+        const match = prices.find((p: any) => String(p.billboardId || p.billboard_id || '') === String(billboard.ID));
+        if (match) {
+          if (match.startDate) customStartDate = match.startDate;
+          if (match.endDate) customEndDate = match.endDate;
+        }
+      }
+    } catch {}
+  }
+
   const customerName = activeContract?.['Customer Name'] || contractInfo?.customer_name || billboard.Customer_Name || '';
   const adType = activeContract?.['Ad Type'] || contractInfo?.ad_type || '';
-  const startDate = activeContract?.['Contract Date'] || contractInfo?.start_date || billboard.Rent_Start_Date || '';
-  const endDate = activeContract?.['End Date'] || contractInfo?.end_date || billboard.Rent_End_Date || '';
+  const startDate = customStartDate || billboard.Rent_Start_Date || activeContract?.['Contract Date'] || contractInfo?.start_date || '';
+  const endDate = customEndDate || billboard.Rent_End_Date || activeContract?.['End Date'] || contractInfo?.end_date || '';
   const contractId = activeContract?.Contract_Number || contractInfo?.id || billboard.Contract_Number || '';
 
   // تحديد حالة اللوحة - العقد الساري يأتي من activeContract

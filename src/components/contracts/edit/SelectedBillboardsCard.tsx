@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Calendar, X, Wrench, Building2, Users, TrendingUp, Pencil, Search, Filter, Printer, Square, CheckSquare, ArrowLeftRight, MoveRight, Trash2, PauseCircle, History as HistoryIcon, RefreshCw, MoreVertical, MapPin } from 'lucide-react';
@@ -131,9 +132,10 @@ interface SelectedBillboardsCardProps {
   /** Map of billboard_id -> actual installation date in current contract (from installation_task_items) */
   installDatesByBillboard?: Map<string, string>;
   previousContractNumber?: number | null;
-  previousContractBillboardIds?: Set<string>;
   individualDiscounts?: Record<string, { value: number; type: 'amount' | 'percent' }>;
   onUpdateIndividualDiscount?: (billboardId: string, value: number, type: 'amount' | 'percent') => void;
+  billboardCustomDates?: Record<string, { startDate: string; endDate: string; startDateReason: string }>;
+  onUpdateBillboardCustomDates?: (billboardId: string, startDate: string, startDateReason: string) => void;
 }
 
 export function SelectedBillboardsCard({
@@ -181,6 +183,8 @@ export function SelectedBillboardsCard({
   previousContractBillboardIds = new Set(),
   individualDiscounts = {},
   onUpdateIndividualDiscount,
+  billboardCustomDates = {},
+  onUpdateBillboardCustomDates,
 }: SelectedBillboardsCardProps) {
   const { map: activeLoansByBillboard } = useActiveLoansByBillboard();
 
@@ -1418,6 +1422,19 @@ export function SelectedBillboardsCard({
                         </div>
                       )}
 
+                      {/* عرض التواريخ المخصصة إذا تم تفعيلها */}
+                      {billboardCustomDates[billboardId]?.startDate && (
+                        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 flex items-center justify-between text-[11px] font-bold text-amber-800 dark:text-amber-300 shrink-0">
+                          <span className="flex items-center gap-1.5">
+                            <Calendar className="h-3.5 w-3.5 text-amber-600" />
+                            تاريخ الحجز المخصص:
+                          </span>
+                          <span className="font-manrope text-[10px]">
+                            {billboardCustomDates[billboardId].startDate} ← {billboardCustomDates[billboardId].endDate}
+                          </span>
+                        </div>
+                      )}
+
                       {/* Pricing Section */}
                       <div className="bg-muted/20 border border-border/60 rounded-xl p-3.5 space-y-2 shrink-0">
                         {/* Base Rental */}
@@ -1536,6 +1553,73 @@ export function SelectedBillboardsCard({
                                 </SelectContent>
                               </Select>
                             </div>
+                          </div>
+                        )}
+
+                        {/* تخصيص تاريخ بدء اللوحة */}
+                        {onUpdateBillboardCustomDates && (
+                          <div className="pt-2 border-t border-border/40 space-y-2 mt-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-muted-foreground font-medium">تخصيص تاريخ بدء اللوحة</span>
+                              <Switch
+                                checked={!!billboardCustomDates[billboardId]?.startDate}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    onUpdateBillboardCustomDates(billboardId, startDate || '', '');
+                                  } else {
+                                    onUpdateBillboardCustomDates(billboardId, '', '');
+                                  }
+                                }}
+                                className="data-[state=checked]:bg-primary"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </div>
+                            
+                            {billboardCustomDates[billboardId]?.startDate && (
+                              <div className="space-y-2 pt-1 animate-in slide-in-from-top-2 duration-200">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-muted-foreground block">تاريخ البدء المخصص</label>
+                                    <Input
+                                      type="date"
+                                      value={billboardCustomDates[billboardId]?.startDate || ''}
+                                      onChange={(e) => {
+                                        onUpdateBillboardCustomDates(billboardId, e.target.value, billboardCustomDates[billboardId]?.startDateReason || '');
+                                      }}
+                                      className="h-8 text-xs font-bold font-manrope text-center"
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-muted-foreground block">تاريخ الانتهاء (تلقائي)</label>
+                                    <Input
+                                      type="date"
+                                      value={billboardCustomDates[billboardId]?.endDate || ''}
+                                      disabled
+                                      className="h-8 text-xs font-bold font-manrope text-center bg-muted/50 cursor-not-allowed opacity-80"
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[10px] font-bold text-muted-foreground block">سبب تعديل تاريخ بدء اللوحة</label>
+                                  <Input
+                                    type="text"
+                                    placeholder="مثال: تأخير بسبب التركيب أو ظروف قهرية"
+                                    value={billboardCustomDates[billboardId]?.startDateReason || ''}
+                                    onChange={(e) => {
+                                      onUpdateBillboardCustomDates(
+                                        billboardId,
+                                        billboardCustomDates[billboardId]?.startDate || '',
+                                        e.target.value
+                                      );
+                                    }}
+                                    className="h-8 text-xs font-bold text-right"
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -1768,9 +1852,12 @@ export function SelectedBillboardsCard({
         contractNumber={contractNumber || null}
         rentStartDate={(() => {
           const pid = pausingBillboard ? String((pausingBillboard as any).ID) : '';
-          return installDatesByBillboard?.get(pid) || pausingBillboard?.Rent_Start_Date || startDate;
+          return billboardCustomDates[pid]?.startDate || installDatesByBillboard?.get(pid) || pausingBillboard?.Rent_Start_Date || startDate;
         })()}
-        contractEndDate={pausingBillboard?.Rent_End_Date || endDate}
+        contractEndDate={(() => {
+          const pid = pausingBillboard ? String((pausingBillboard as any).ID) : '';
+          return billboardCustomDates[pid]?.endDate || pausingBillboard?.Rent_End_Date || endDate;
+        })()}
         billboardPrice={(() => {
           if (!pausingBillboard) return 0;
           const pid = String((pausingBillboard as any).ID);

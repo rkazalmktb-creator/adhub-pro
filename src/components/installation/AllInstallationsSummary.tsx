@@ -314,7 +314,11 @@ export const AllInstallationsSummary: React.FC<AllInstallationsSummaryProps> = (
                     return (totalFaces > 1 && facesToInstall === 1) ? fullCompanyCost / 2 : fullCompanyCost;
                   })();
               taskCompany += basicCompanyCost + (item.company_additional_cost || 0);
-              taskCustomer += (item.customer_installation_cost || 0) + (item.additional_cost || 0);
+              const isReinstalled = (item.reinstall_count || 0) > 0;
+              const customerCost = isReinstalled
+                ? (Number(item.customer_original_install_cost) || 0) + (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
+                : (item.customer_installation_cost || 0);
+              taskCustomer += customerCost + (item.additional_cost || 0);
             });
 
             const isCurrent = t.id === currentTaskId;

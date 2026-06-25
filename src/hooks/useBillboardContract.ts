@@ -126,7 +126,8 @@ export const useBillboardContract = () => {
           Ad_Type: contractData['Ad Type'],
           Rent_Start_Date: contractData['Contract Date'],
           Rent_End_Date: contractData['End Date'],
-          Status: 'rented'
+          Status: 'rented',
+          is_visible_in_available: false
         })
         .eq('ID', Number(billboardId));
       
@@ -181,7 +182,8 @@ export const useBillboardContract = () => {
           Ad_Type: null,
           Rent_Start_Date: null,
           Rent_End_Date: null,
-          Status: 'available'
+          Status: 'available',
+          is_visible_in_available: null
         })
         .eq('ID', Number(billboardId));
       

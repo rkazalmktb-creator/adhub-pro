@@ -741,6 +741,142 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
     return (b as any)._paused ? `${rent_end_date_base} (موقوفة)` : rent_end_date_base;
   };
 
+  // Helper to map and normalize a billboard for printing/PDF
+  const mapBillboardForPrint = (b: any, billboardPrices: Record<string, any>): UnifiedBillboardData => {
+    const id = String(b.ID ?? b.id ?? b.code ?? '');
+    const currencyInfo = getCurrencyInfo();
+    const contractDetails = calculateContractDetails();
+
+    let image = '';
+    if (b.image) {
+      image = String(b.image);
+    } else if (b.Image_URL) {
+      image = String(b.Image_URL);
+    }
+
+    const historicalPrice = billboardPrices[id] ?? billboardPrices[Number(id)];
+    let price = '';
+    let priceNum = 0;
+    if (historicalPrice !== undefined && historicalPrice !== null) {
+      const num = Number(historicalPrice);
+      if (!isNaN(num) && num > 0) {
+        price = `${formatArabicNumber(num)} ${currencyInfo.symbol}`;
+        priceNum = num;
+      }
+    } else {
+      const fallbackPrice = getSmartFallbackPrice(id, b);
+      if (fallbackPrice > 0) {
+        price = `${formatArabicNumber(fallbackPrice)} ${currencyInfo.symbol}`;
+        priceNum = fallbackPrice;
+      }
+    }
+
+    let originalPrice = '';
+    let hasDiscount = false;
+    let origPriceNumResolved = 0;
+    let customStartDate = '';
+    let customEndDate = '';
+    let customStartDateReason = '';
+    let isEndDateCustom = false;
+
+    try {
+      if (contract?.billboard_prices) {
+        const pricesData = typeof contract.billboard_prices === 'string'
+          ? JSON.parse(contract.billboard_prices)
+          : contract.billboard_prices;
+        if (Array.isArray(pricesData)) {
+          const priceItem = pricesData.find((item: any) => String(item.billboardId || item.billboard_id || '') === id);
+          if (priceItem) {
+            origPriceNumResolved = Number(priceItem.priceBeforeDiscount ?? priceItem.basePriceBeforeDiscount ?? 0);
+            if (priceItem.startDate) customStartDate = priceItem.startDate;
+            if (priceItem.endDate) {
+              customEndDate = priceItem.endDate;
+              const contractMainEndDate = contract?.['End Date'] || contract?.end_date || '';
+              if (contractMainEndDate && priceItem.endDate !== contractMainEndDate) {
+                isEndDateCustom = true;
+              }
+            }
+            if (priceItem.startDateReason) customStartDateReason = priceItem.startDateReason;
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error parsing billboard prices in helper:', e);
+    }
+
+    // Paused billboards: use captured original (full) price as "before discount"
+    if ((b as any)._paused && (!origPriceNumResolved || origPriceNumResolved <= 0)) {
+      const op = Number((b as any)._paused_original_price);
+      if (Number.isFinite(op) && op > 0) origPriceNumResolved = op;
+    }
+    if (origPriceNumResolved > 0 && origPriceNumResolved > priceNum) {
+      originalPrice = `${formatArabicNumber(origPriceNumResolved)} ${currencyInfo.symbol}`;
+      hasDiscount = true;
+    }
+
+    // Paused billboards: also show net (after-discount, pre-pause) as middle strikethrough
+    let prePausePrice = '';
+    if ((b as any)._paused) {
+      const np = Number((b as any)._paused_net_price);
+      if (Number.isFinite(np) && np > 0 && np !== priceNum && np !== origPriceNumResolved) {
+        prePausePrice = `${formatArabicNumber(np)} ${currencyInfo.symbol}`;
+      }
+    }
+
+    let coords = String(b.GPS_Coordinates ?? b.coords ?? '');
+    const gpsLink = coords ? `https://www.google.com/maps?q=${encodeURIComponent(coords)}` : (b.GPS_Link || '');
+
+    // Get end date - priority to customEndDate
+    const rent_end_date = customEndDate || getBillboardRentEndDate(b, contractDetails.endDate || '');
+    
+    // Get duration days - priority to custom dates duration
+    let duration_days = contractDetails.duration || '';
+    if (customStartDate && customEndDate) {
+      try {
+        const start = new Date(customStartDate);
+        const end = new Date(customEndDate);
+        if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+          const days = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+          if (days > 0) duration_days = String(days);
+        }
+      } catch (e) {
+        console.error('Error calculating custom duration:', e);
+      }
+    }
+
+    // Replacement row: override price with allocated amount and end date
+    if ((b as any)._replacement) {
+      const _alloc = Number((b as any)._replacement_allocated) || 0;
+      if (_alloc > 0) { price = `${formatArabicNumber(_alloc)} ${currencyInfo.symbol}`; }
+    }
+
+    return {
+      id,
+      code: b.code || `TR-${String(b.ID || b.id || '').padStart(4, '0')}`,
+      billboardName: b.Billboard_Name || b.billboardName || '',
+      image,
+      municipality: b.Municipality || b.municipality || '',
+      district: b.District || b.district || '',
+      landmark: b.Nearest_Landmark || b.nearest_landmark || '',
+      size: b.Size || b.size || '',
+      faces: String(b.Faces_Count || b.faces || '2'),
+      price,
+      originalPrice,
+      hasDiscount,
+      prePausePrice,
+      gpsLink,
+      rent_end_date,
+      duration_days,
+      isReplacement: !!(b as any)._replacement,
+      replacementStartDate: (b as any)._replacement_start_date,
+      replacedBillboardName: (b as any)._replacement_paused_name,
+      isEndDateCustom,
+      customStartDate,
+      customEndDate,
+      customStartDateReason,
+    };
+  };
+
   // ✅ REFACTORED: Get payment installments from installments_data
   const getPaymentInstallments = () => {
     const payments = [];
@@ -1796,14 +1932,14 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
 
             @font-face { 
               font-family: 'Doran'; 
-              src: url('/Doran-Regular.otf') format('opentype'); 
+              src: url('${window.location.origin}/Doran-Regular.otf') format('opentype'); 
               font-weight: 400; 
               font-style: normal; 
               font-display: swap; 
             }
             @font-face { 
               font-family: 'Doran'; 
-              src: url('/Doran-Bold.otf') format('opentype'); 
+              src: url('${window.location.origin}/Doran-Bold.otf') format('opentype'); 
               font-weight: 700; 
               font-style: normal; 
               font-display: swap; 
@@ -2581,103 +2717,9 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
       const billboardPrices = getBillboardPrices();
       mergePausedPrices(billboardPrices, billboardsToShow);
 
-      const normalizedBillboards: UnifiedBillboardData[] = billboardsToShow.map((b: any) => {
-        const id = String(b.ID ?? b.id ?? b.code ?? '');
-
-        let image = '';
-        if (b.image) {
-          image = String(b.image);
-        } else if (b.Image_URL) {
-          image = String(b.Image_URL);
-        }
-
-        const historicalPrice = billboardPrices[id] ?? billboardPrices[Number(id)];
-        let price = '';
-        let priceNum = 0;
-        if (historicalPrice !== undefined && historicalPrice !== null) {
-          const num = Number(historicalPrice);
-          if (!isNaN(num) && num > 0) {
-            price = `${formatArabicNumber(num)} ${currencyInfo.symbol}`;
-            priceNum = num;
-          }
-        } else {
-          const fallbackPrice = getSmartFallbackPrice(id, b);
-          if (fallbackPrice > 0) {
-            price = `${formatArabicNumber(fallbackPrice)} ${currencyInfo.symbol}`;
-            priceNum = fallbackPrice;
-          }
-        }
-
-        let originalPrice = '';
-        let hasDiscount = false;
-        let origPriceNumResolved = 0;
-        try {
-          if (contract?.billboard_prices) {
-            const pricesData = typeof contract.billboard_prices === 'string'
-              ? JSON.parse(contract.billboard_prices)
-              : contract.billboard_prices;
-            if (Array.isArray(pricesData)) {
-              const priceItem = pricesData.find((item: any) => String(item.billboardId) === id);
-              if (priceItem) {
-                origPriceNumResolved = Number(priceItem.priceBeforeDiscount ?? priceItem.basePriceBeforeDiscount ?? 0);
-              }
-            }
-          }
-        } catch (e) {
-          console.error('Error parsing billboard prices for discount:', e);
-        }
-        // Paused billboards: use captured original (full) price as "before discount"
-        if ((b as any)._paused && (!origPriceNumResolved || origPriceNumResolved <= 0)) {
-          const op = Number((b as any)._paused_original_price);
-          if (Number.isFinite(op) && op > 0) origPriceNumResolved = op;
-        }
-        if (origPriceNumResolved > 0 && origPriceNumResolved > priceNum) {
-          originalPrice = `${formatArabicNumber(origPriceNumResolved)} ${currencyInfo.symbol}`;
-          hasDiscount = true;
-        }
-
-        // ✅ Paused billboards: also show net (after-discount, pre-pause) as middle strikethrough
-        let prePausePrice = '';
-        if ((b as any)._paused) {
-          const np = Number((b as any)._paused_net_price);
-          if (Number.isFinite(np) && np > 0 && np !== priceNum && np !== origPriceNumResolved) {
-            prePausePrice = `${formatArabicNumber(np)} ${currencyInfo.symbol}`;
-          }
-        }
-
-        let coords = String(b.GPS_Coordinates ?? b.coords ?? '');
-        const gpsLink = coords ? `https://www.google.com/maps?q=${encodeURIComponent(coords)}` : (b.GPS_Link || '');
-
-        const rent_end_date = getBillboardRentEndDate(b, contractDetails.endDate || '');
-        const duration_days = contractDetails.duration || '';
-
-        // ✅ Replacement row: override price with allocated amount and end date
-        if ((b as any)._replacement) {
-          const _alloc = Number((b as any)._replacement_allocated) || 0;
-          if (_alloc > 0) { price = `${formatArabicNumber(_alloc)} ${currencyInfo.symbol}`; }
-        }
-        return {
-          id,
-          code: b.code || `TR-${String(b.ID || b.id || '').padStart(4, '0')}`,
-          billboardName: b.Billboard_Name || b.billboardName || '',
-          image,
-          municipality: b.Municipality || b.municipality || '',
-          district: b.District || b.district || '',
-          landmark: b.Nearest_Landmark || b.nearest_landmark || '',
-          size: b.Size || b.size || '',
-          faces: String(b.Faces_Count || b.faces || '2'),
-          price,
-          originalPrice,
-          hasDiscount,
-          prePausePrice,
-          gpsLink,
-          rent_end_date,
-          duration_days,
-          isReplacement: !!(b as any)._replacement,
-          replacementStartDate: (b as any)._replacement_start_date,
-          replacedBillboardName: (b as any)._replacement_paused_name,
-        };
-      });
+      const normalizedBillboards: UnifiedBillboardData[] = billboardsToShow.map((b: any) => 
+        mapBillboardForPrint(b, billboardPrices)
+      );
 
       const sortedBillboards = normalizedBillboards.sort((a, b) => {
         const sizeA = sizesData.find(s => s.name === a.size)?.sort_order ?? 999;
@@ -2961,101 +3003,9 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
       const billboardPrices = getBillboardPrices();
       mergePausedPrices(billboardPrices, billboardsToShow);
 
-      const normalizedBillboards: UnifiedBillboardData[] = billboardsToShow.map((b: any) => {
-        const id = String(b.ID ?? b.id ?? b.code ?? '');
-
-        let image = '';
-        if (b.image) {
-          image = String(b.image);
-        } else if (b.Image_URL) {
-          image = String(b.Image_URL);
-        }
-
-        const historicalPrice = billboardPrices[id] ?? billboardPrices[Number(id)];
-        let price = '';
-        let priceNum = 0;
-        if (historicalPrice !== undefined && historicalPrice !== null) {
-          const num = Number(historicalPrice);
-          if (!isNaN(num) && num > 0) {
-            price = `${formatArabicNumber(num)} ${currencyInfo.symbol}`;
-            priceNum = num;
-          }
-        } else {
-          const fallbackPrice = getSmartFallbackPrice(id, b);
-          if (fallbackPrice > 0) {
-            price = `${formatArabicNumber(fallbackPrice)} ${currencyInfo.symbol}`;
-            priceNum = fallbackPrice;
-          }
-        }
-
-        let originalPrice = '';
-        let hasDiscount = false;
-        let origPriceNumResolved = 0;
-        try {
-          if (contract?.billboard_prices) {
-            const pricesData = typeof contract.billboard_prices === 'string'
-              ? JSON.parse(contract.billboard_prices)
-              : contract.billboard_prices;
-            if (Array.isArray(pricesData)) {
-              const priceItem = pricesData.find((item: any) => String(item.billboardId) === id);
-              if (priceItem) {
-                origPriceNumResolved = Number(priceItem.priceBeforeDiscount ?? priceItem.basePriceBeforeDiscount ?? 0);
-              }
-            }
-          }
-        } catch (e) {
-          console.error('Error parsing billboard prices for discount:', e);
-        }
-        if ((b as any)._paused && (!origPriceNumResolved || origPriceNumResolved <= 0)) {
-          const op = Number((b as any)._paused_original_price);
-          if (Number.isFinite(op) && op > 0) origPriceNumResolved = op;
-        }
-        if (origPriceNumResolved > 0 && origPriceNumResolved > priceNum) {
-          originalPrice = `${formatArabicNumber(origPriceNumResolved)} ${currencyInfo.symbol}`;
-          hasDiscount = true;
-        }
-
-        let prePausePrice = '';
-        if ((b as any)._paused) {
-          const np = Number((b as any)._paused_net_price);
-          if (Number.isFinite(np) && np > 0 && np !== priceNum && np !== origPriceNumResolved) {
-            prePausePrice = `${formatArabicNumber(np)} ${currencyInfo.symbol}`;
-          }
-        }
-
-        let coords = String(b.GPS_Coordinates ?? b.coords ?? '');
-        const gpsLink = coords ? `https://www.google.com/maps?q=${encodeURIComponent(coords)}` : (b.GPS_Link || '');
-
-        const rent_end_date = getBillboardRentEndDate(b, contractDetails.endDate || '');
-        const duration_days = contractDetails.duration || '';
-
-        // ✅ Replacement row: override price with allocated amount and end date
-        if ((b as any)._replacement) {
-          const _alloc = Number((b as any)._replacement_allocated) || 0;
-          if (_alloc > 0) { price = `${formatArabicNumber(_alloc)} ${currencyInfo.symbol}`; }
-        }
-        return {
-          id,
-          code: b.code || `TR-${String(b.ID || b.id || '').padStart(4, '0')}`,
-          billboardName: b.Billboard_Name || b.billboardName || '',
-          image,
-          municipality: b.Municipality || b.municipality || '',
-          district: b.District || b.district || '',
-          landmark: b.Nearest_Landmark || b.nearest_landmark || '',
-          size: b.Size || b.size || '',
-          faces: String(b.Faces_Count || b.faces || '2'),
-          price,
-          originalPrice,
-          hasDiscount,
-          prePausePrice,
-          gpsLink,
-          rent_end_date,
-          duration_days,
-          isReplacement: !!(b as any)._replacement,
-          replacementStartDate: (b as any)._replacement_start_date,
-          replacedBillboardName: (b as any)._replacement_paused_name,
-        };
-      });
+      const normalizedBillboards: UnifiedBillboardData[] = billboardsToShow.map((b: any) => 
+        mapBillboardForPrint(b, billboardPrices)
+      );
 
       const sortedBillboards = normalizedBillboards.sort((a, b) => {
         const sizeA = sizesData.find(s => s.name === a.size)?.sort_order ?? 999;
@@ -3358,81 +3308,9 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
       const billboardPrices = getBillboardPrices();
       mergePausedPrices(billboardPrices, billboardsToShow);
 
-      const normalizedBillboards: UnifiedBillboardData[] = billboardsToShow.map((b: any) => {
-        const id = String(b.ID ?? b.id ?? b.code ?? '');
-        let image = '';
-        if (b.image) image = String(b.image);
-        else if (b.Image_URL) image = String(b.Image_URL);
-
-        const historicalPrice = billboardPrices[id] ?? billboardPrices[Number(id)];
-        let price = '';
-        let priceNum = 0;
-        if (historicalPrice !== undefined && historicalPrice !== null) {
-          const num = Number(historicalPrice);
-          if (!isNaN(num) && num > 0) {
-            price = `${formatArabicNumber(num)} ${currencyInfo.symbol}`;
-            priceNum = num;
-          }
-        } else {
-          const fallbackPrice = getSmartFallbackPrice(id, b);
-          if (fallbackPrice > 0) {
-            price = `${formatArabicNumber(fallbackPrice)} ${currencyInfo.symbol}`;
-            priceNum = fallbackPrice;
-          }
-        }
-
-        let originalPrice = '';
-        let hasDiscount = false;
-        let origPriceNumResolved = 0;
-        try {
-          if (contract?.billboard_prices) {
-            const pricesData = typeof contract.billboard_prices === 'string' ? JSON.parse(contract.billboard_prices) : contract.billboard_prices;
-            if (Array.isArray(pricesData)) {
-              const priceItem = pricesData.find((item: any) => String(item.billboardId) === id);
-              if (priceItem) {
-                origPriceNumResolved = Number(priceItem.priceBeforeDiscount ?? priceItem.basePriceBeforeDiscount ?? 0);
-              }
-            }
-          }
-        } catch (e) { /* ignore */ }
-        if ((b as any)._paused && (!origPriceNumResolved || origPriceNumResolved <= 0)) {
-          const op = Number((b as any)._paused_original_price);
-          if (Number.isFinite(op) && op > 0) origPriceNumResolved = op;
-        }
-        if (origPriceNumResolved > 0 && origPriceNumResolved > priceNum) {
-          originalPrice = `${formatArabicNumber(origPriceNumResolved)} ${currencyInfo.symbol}`;
-          hasDiscount = true;
-        }
-
-        let prePausePrice = '';
-        if ((b as any)._paused) {
-          const np = Number((b as any)._paused_net_price);
-          if (Number.isFinite(np) && np > 0 && np !== priceNum && np !== origPriceNumResolved) {
-            prePausePrice = `${formatArabicNumber(np)} ${currencyInfo.symbol}`;
-          }
-        }
-
-        let coords = String(b.GPS_Coordinates ?? b.coords ?? '');
-        const gpsLink = coords ? `https://www.google.com/maps?q=${encodeURIComponent(coords)}` : (b.GPS_Link || '');
-        const rent_end_date = getBillboardRentEndDate(b, contractDetails.endDate || '');
-        const duration_days = contractDetails.duration || '';
-
-        // ✅ Replacement row: override price with allocated amount and end date
-        if ((b as any)._replacement) {
-          const _alloc = Number((b as any)._replacement_allocated) || 0;
-          if (_alloc > 0) { price = `${formatArabicNumber(_alloc)} ${currencyInfo.symbol}`; }
-        }
-        return {
-          id, code: b.code || `TR-${String(b.ID || b.id || '').padStart(4, '0')}`,
-          billboardName: b.Billboard_Name || b.billboardName || '', image,
-          municipality: b.Municipality || b.municipality || '',
-          district: b.District || b.district || '',
-          landmark: b.Nearest_Landmark || b.nearest_landmark || '',
-          size: b.Size || b.size || '',
-          faces: String(b.Faces_Count || b.faces || '2'),
-          price, originalPrice, hasDiscount, prePausePrice, gpsLink, rent_end_date, duration_days, isReplacement: !!(b as any)._replacement, replacementStartDate: (b as any)._replacement_start_date, replacedBillboardName: (b as any)._replacement_paused_name,
-        };
-      });
+      const normalizedBillboards: UnifiedBillboardData[] = billboardsToShow.map((b: any) => 
+        mapBillboardForPrint(b, billboardPrices)
+      );
 
       const sortedBillboards = normalizedBillboards.sort((a, b) => {
         const sizeA = sizesData.find(s => s.name === a.size)?.sort_order ?? 999;
@@ -3623,104 +3501,9 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
       mergePausedPrices(billboardPrices, billboardsToShow);
 
       // Normalize billboards
-      const normalizedBillboards: UnifiedBillboardData[] = billboardsToShow.map((b: any) => {
-        const id = String(b.ID ?? b.id ?? b.code ?? '');
-
-        let image = '';
-        if (b.image) {
-          image = String(b.image);
-        } else if (b.Image_URL) {
-          image = String(b.Image_URL);
-        }
-
-        const historicalPrice = billboardPrices[id] ?? billboardPrices[Number(id)];
-        let price = '';
-        let priceNum = 0;
-        if (historicalPrice !== undefined && historicalPrice !== null) {
-          const num = Number(historicalPrice);
-          if (!isNaN(num) && num > 0) {
-            price = `${formatArabicNumber(num)} ${currencyInfo.symbol}`;
-            priceNum = num;
-          }
-        } else {
-          // ✅ Smart fallback: derive from Total Rent / billboard count
-          const fallbackPrice = getSmartFallbackPrice(id, b);
-          if (fallbackPrice > 0) {
-            price = `${formatArabicNumber(fallbackPrice)} ${currencyInfo.symbol}`;
-            priceNum = fallbackPrice;
-          }
-        }
-
-        // الحصول على السعر الأصلي قبل التخفيض
-        let originalPrice = '';
-        let hasDiscount = false;
-        let origPriceNumResolved = 0;
-        try {
-          if (contract?.billboard_prices) {
-            const pricesData = typeof contract.billboard_prices === 'string'
-              ? JSON.parse(contract.billboard_prices)
-              : contract.billboard_prices;
-            if (Array.isArray(pricesData)) {
-              const priceItem = pricesData.find((item: any) => String(item.billboardId) === id);
-              if (priceItem) {
-                origPriceNumResolved = Number(priceItem.priceBeforeDiscount ?? priceItem.basePriceBeforeDiscount ?? 0);
-              }
-            }
-          }
-        } catch (e) {
-          console.error('Error parsing billboard prices for discount:', e);
-        }
-        if ((b as any)._paused && (!origPriceNumResolved || origPriceNumResolved <= 0)) {
-          const op = Number((b as any)._paused_original_price);
-          if (Number.isFinite(op) && op > 0) origPriceNumResolved = op;
-        }
-        if (origPriceNumResolved > 0 && origPriceNumResolved > priceNum) {
-          originalPrice = `${formatArabicNumber(origPriceNumResolved)} ${currencyInfo.symbol}`;
-          hasDiscount = true;
-        }
-
-        let prePausePrice = '';
-        if ((b as any)._paused) {
-          const np = Number((b as any)._paused_net_price);
-          if (Number.isFinite(np) && np > 0 && np !== priceNum && np !== origPriceNumResolved) {
-            prePausePrice = `${formatArabicNumber(np)} ${currencyInfo.symbol}`;
-          }
-        }
-
-        let coords = String(b.GPS_Coordinates ?? b.coords ?? '');
-        const gpsLink = coords ? `https://www.google.com/maps?q=${encodeURIComponent(coords)}` : (b.GPS_Link || '');
-
-        // ✅ FIX: Add endDate and durationDays - source of truth = contract dates
-        const rent_end_date = getBillboardRentEndDate(b, contractDetails.endDate || '');
-        const duration_days = contractDetails.duration || '';
-
-        // ✅ Replacement row: override price with allocated amount and end date
-        if ((b as any)._replacement) {
-          const _alloc = Number((b as any)._replacement_allocated) || 0;
-          if (_alloc > 0) { price = `${formatArabicNumber(_alloc)} ${currencyInfo.symbol}`; }
-        }
-        return {
-          id,
-          code: b.code || `TR-${String(b.ID || b.id || '').padStart(4, '0')}`,
-          billboardName: b.Billboard_Name || b.billboardName || '',
-          image,
-          municipality: b.Municipality || b.municipality || '',
-          district: b.District || b.district || '',
-          landmark: b.Nearest_Landmark || b.nearest_landmark || '',
-          size: b.Size || b.size || '',
-          faces: String(b.Faces_Count || b.faces || '2'),
-          price,
-          originalPrice,
-          hasDiscount,
-          prePausePrice,
-          gpsLink,
-          rent_end_date,
-          duration_days,
-          isReplacement: !!(b as any)._replacement,
-          replacementStartDate: (b as any)._replacement_start_date,
-          replacedBillboardName: (b as any)._replacement_paused_name,
-        };
-      });
+      const normalizedBillboards: UnifiedBillboardData[] = billboardsToShow.map((b: any) => 
+        mapBillboardForPrint(b, billboardPrices)
+      );
 
       // Sort billboards
       const sortedBillboards = normalizedBillboards.sort((a, b) => {

@@ -263,7 +263,9 @@ export const BillboardHistoryDialog: React.FC<BillboardHistoryDialogProps> = ({
             installed_image_face_a_url: imgA,
             installed_image_face_b_url: imgB,
             team_name: '',
-            notes: 'عقد حالي نشط',
+            notes: individualBillboardData?.startDateReason
+              ? `عقد حالي نشط — سبب تعديل البداية: ${individualBillboardData.startDateReason}`
+              : 'عقد حالي نشط',
             created_at: new Date().toISOString(),
             print_cost: individualPrintCost,
             include_installation_in_price: includeInstall,

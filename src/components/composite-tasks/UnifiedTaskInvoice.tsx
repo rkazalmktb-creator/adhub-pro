@@ -115,11 +115,15 @@ export function UnifiedTaskInvoice({
         if (t.installation_task_id) {
           const { data: installItems } = await supabase
             .from('installation_task_items')
-            .select('customer_installation_cost, company_installation_cost, additional_cost')
+            .select('customer_installation_cost, company_installation_cost, additional_cost, reinstall_count, customer_original_install_cost, customer_reinstall_cost')
             .eq('task_id', t.installation_task_id);
           if (installItems) {
             installItems.forEach(i => {
-              newCustomerInstall += Number(i.customer_installation_cost) || 0;
+              const isReinstalled = (i.reinstall_count || 0) > 0;
+              const itemCost = isReinstalled
+                ? (Number(i.customer_original_install_cost) || 0) + (Number(i.customer_reinstall_cost) || Number(i.customer_installation_cost) || 0)
+                : (Number(i.customer_installation_cost) || 0);
+              newCustomerInstall += itemCost;
               newCompanyInstall += (Number(i.company_installation_cost) || 0) + (Number(i.additional_cost) || 0);
             });
           }

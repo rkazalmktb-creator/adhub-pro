@@ -599,11 +599,30 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
 
   const adType = getAdType();
   
-  const startDate = contractInfo?.start_date || billboard.Rent_Start_Date || '';
+  // جلب التواريخ المخصصة للوحة إن وجدت
+  let customStartDate = '';
+  let customEndDate = '';
+  if (activeContract?.billboard_prices) {
+    try {
+      const prices = typeof activeContract.billboard_prices === 'string'
+        ? JSON.parse(activeContract.billboard_prices)
+        : activeContract.billboard_prices;
+      if (Array.isArray(prices)) {
+        const match = prices.find((p: any) => String(p.billboardId || p.billboard_id || '') === String(billboard.ID));
+        if (match) {
+          if (match.startDate) customStartDate = match.startDate;
+          if (match.endDate) customEndDate = match.endDate;
+        }
+      }
+    } catch {}
+  }
+
+  const startDate = customStartDate || contractInfo?.start_date || billboard.Rent_Start_Date || '';
   // استخدام تاريخ انتهاء اللوحة أولاً (لأنه يتم تحديثه عند التمديد)
   // ✅ استخدام بيانات العقد الساري أولاً (من billboard_ids)
-  const endDate = activeContract?.['End Date'] || billboard.Rent_End_Date || contractInfo?.end_date || '';
+  const endDate = customEndDate || activeContract?.['End Date'] || billboard.Rent_End_Date || contractInfo?.end_date || '';
   const contractId = activeContract?.Contract_Number || (billboard as any).Contract_Number || (billboard as any).contractNumber || contractInfo?.id || '';
+
 
   // استخدام yearlyContractCode من الـ state
 

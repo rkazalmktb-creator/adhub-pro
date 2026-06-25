@@ -220,7 +220,86 @@ export default function ContractEdit() {
   const [durationDays, setDurationDays] = useState<number>(0);
   const [endDate, setEndDate] = useState('');
   const [use30DayMonth, setUse30DayMonth] = useState<boolean>(true); // حساب الشهر = 30 يوم
+  const [billboardCustomDates, setBillboardCustomDates] = useState<Record<string, { startDate: string; endDate: string; startDateReason: string }>>({});
   
+  // Auto-calculate end date for a custom start date based on contract duration
+  const calculateEndDateForCustomStart = (
+    customStartStr: string,
+    mode: 'months' | 'days',
+    months: number,
+    days: number,
+    is30Day: boolean
+  ): string => {
+    if (!customStartStr) return '';
+    try {
+      const d = new Date(customStartStr);
+      const end = new Date(d);
+      if (mode === 'months') {
+        if (is30Day) {
+          const daysToAdd = Math.max(0, Number(months || 0)) * 30;
+          end.setDate(end.getDate() + daysToAdd);
+        } else {
+          end.setMonth(end.getMonth() + months);
+        }
+      } else {
+        const daysToAdd = Math.max(0, Number(days || 0));
+        end.setDate(end.getDate() + daysToAdd);
+      }
+      return end.toISOString().split('T')[0];
+    } catch {
+      return '';
+    }
+  };
+
+  const handleUpdateBillboardCustomDates = (billboardId: string, customStartDate: string, reason: string) => {
+    setBillboardCustomDates((prev) => {
+      const updated = { ...prev };
+      if (!customStartDate) {
+        delete updated[billboardId];
+      } else {
+        const computedEndDate = calculateEndDateForCustomStart(
+          customStartDate,
+          pricingMode,
+          durationMonths,
+          durationDays,
+          use30DayMonth
+        );
+        updated[billboardId] = {
+          startDate: customStartDate,
+          endDate: computedEndDate,
+          startDateReason: reason
+        };
+      }
+      return updated;
+    });
+  };
+
+  // Re-calculate custom end dates if contract duration parameters change
+  useEffect(() => {
+    if (Object.keys(billboardCustomDates).length === 0) return;
+    setBillboardCustomDates((prev) => {
+      const updated = { ...prev };
+      let changed = false;
+      Object.keys(updated).forEach((id) => {
+        const entry = updated[id];
+        if (entry.startDate) {
+          const newEnd = calculateEndDateForCustomStart(
+            entry.startDate,
+            pricingMode,
+            durationMonths,
+            durationDays,
+            use30DayMonth
+          );
+          if (newEnd !== entry.endDate) {
+            updated[id] = { ...entry, endDate: newEnd };
+            changed = true;
+          }
+        }
+      });
+      return changed ? updated : prev;
+    });
+  }, [pricingMode, durationMonths, durationDays, use30DayMonth]);
+
   // ✅ NEW: Alert states for modifying pricing parameters when useStoredPrices is true
   const [pricingAlertOpen, setPricingAlertOpen] = useState(false);
   const [pricingAlertPendingAction, setPricingAlertPendingAction] = useState<(() => void) | null>(null);
@@ -962,6 +1041,33 @@ export default function ContractEdit() {
       }
     } catch (e) {
       console.warn('Failed to parse individual discounts from currentContract:', e);
+    }
+  }, [currentContract?.billboard_prices]);
+
+  // ✅ Load individual custom dates and reasons from stored contract billboard_prices
+  useEffect(() => {
+    if (!currentContract || !currentContract.billboard_prices) return;
+    try {
+      const parsedPrices = typeof currentContract.billboard_prices === 'string'
+        ? JSON.parse(currentContract.billboard_prices)
+        : currentContract.billboard_prices;
+      if (Array.isArray(parsedPrices)) {
+        const dates: Record<string, { startDate: string; endDate: string; startDateReason: string }> = {};
+        parsedPrices.forEach((bp: any) => {
+          const bId = String(bp.billboardId || bp.billboard_id || '');
+          if (bId && (bp.startDate || bp.endDate)) {
+            dates[bId] = {
+              startDate: bp.startDate || '',
+              endDate: bp.endDate || '',
+              startDateReason: bp.startDateReason || ''
+            };
+          }
+        });
+        setBillboardCustomDates(dates);
+        console.log('✅ Loaded individual billboard custom dates:', dates);
+      }
+    } catch (e) {
+      console.warn('Failed to parse individual custom dates from currentContract:', e);
     }
   }, [currentContract?.billboard_prices]);
 
@@ -2070,10 +2176,13 @@ export default function ContractEdit() {
           individualDiscountValue: individualDiscounts[r.billboardId]?.value || 0,
           individualDiscountType: individualDiscounts[r.billboardId]?.type || 'amount',
           individualDiscountAmt: r.individualDiscountAmt || 0,
+          startDate: billboardCustomDates[r.billboardId]?.startDate || '',
+          endDate: billboardCustomDates[r.billboardId]?.endDate || '',
+          startDateReason: billboardCustomDates[r.billboardId]?.startDateReason || '',
         };
       })
       .filter(Boolean);
-  }, [selected, unifiedPricingByBillboard, pricingCategory, pricingMode, durationMonths, durationDays, individualDiscounts]);
+  }, [selected, unifiedPricingByBillboard, pricingCategory, pricingMode, durationMonths, durationDays, individualDiscounts, billboardCustomDates]);
 
   const lastSyncedSelectedPricesRef = React.useRef<string>('');
   useEffect(() => {
@@ -3778,6 +3887,11 @@ export default function ContractEdit() {
               installDatesByBillboard={installDatesByBillboard}
               individualDiscounts={individualDiscounts}
               onUpdateIndividualDiscount={handleUpdateIndividualDiscount}
+              startDate={startDate}
+              endDate={endDate}
+              billboardCustomDates={billboardCustomDates}
+              onUpdateBillboardCustomDates={handleUpdateBillboardCustomDates}
+              use30DayMonth={use30DayMonth}
             />
 
             {/* ✅ NEW: إيجارات اللوحات الصديقة بالجملة */}

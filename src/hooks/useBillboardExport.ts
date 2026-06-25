@@ -1,7 +1,7 @@
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/integrations/supabase/client';
-import { isBillboardAvailable, isBillboardBlockedFromAvailability } from '@/utils/contractUtils';
+import { isBillboardAvailable, isBillboardBlockedFromAvailability, isContractExpired } from '@/utils/contractUtils';
 import { addExtraSheets } from '@/utils/excelExportSheets';
 import { normalizeGoogleImageUrl } from '@/utils/imageUtils';
 
@@ -26,7 +26,7 @@ async function loadActiveContractsByBillboard(): Promise<Map<string, ActiveContr
 
     const { data, error } = await supabase
       .from('Contract')
-      .select('Contract_Number, "Contract Date", "End Date", "Customer Name", "Ad Type", billboard_ids')
+      .select('Contract_Number, "Contract Date", "End Date", "Customer Name", "Ad Type", billboard_ids, billboard_prices')
       .gte('End Date', todayStr);
 
     if (error) throw error;
@@ -37,14 +37,37 @@ async function loadActiveContractsByBillboard(): Promise<Map<string, ActiveContr
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
-      const info: ActiveContractInfo = {
-        contractNumber: c.Contract_Number,
-        startDate: c['Contract Date'] || '',
-        endDate: c['End Date'] || '',
-        customerName: c['Customer Name'] || '',
-        adType: c['Ad Type'] || '',
-      };
+
+      let billboardPricesParsed: any[] = [];
+      if (c.billboard_prices) {
+        try {
+          billboardPricesParsed = typeof c.billboard_prices === 'string'
+            ? JSON.parse(c.billboard_prices)
+            : c.billboard_prices;
+        } catch (e) {
+          console.warn('Failed to parse billboard_prices in loadActiveContracts:', e);
+        }
+      }
+
       ids.forEach((id) => {
+        let customStart = '';
+        let customEnd = '';
+        if (Array.isArray(billboardPricesParsed)) {
+          const match = billboardPricesParsed.find((p: any) => String(p.billboardId || p.billboard_id || '') === id);
+          if (match) {
+            if (match.startDate) customStart = match.startDate;
+            if (match.endDate) customEnd = match.endDate;
+          }
+        }
+
+        const info: ActiveContractInfo = {
+          contractNumber: c.Contract_Number,
+          startDate: customStart || c['Contract Date'] || '',
+          endDate: customEnd || c['End Date'] || '',
+          customerName: c['Customer Name'] || '',
+          adType: c['Ad Type'] || '',
+        };
+
         const existing = map.get(id);
         if (!existing || (info.endDate && info.endDate > existing.endDate)) {
           map.set(id, info);
@@ -63,7 +86,12 @@ async function loadActiveContractsByBillboard(): Promise<Map<string, ActiveContr
 function getActiveContractForBillboard(billboard: any): ActiveContractInfo | undefined {
   const id = String(billboard?.ID ?? billboard?.id ?? '').trim();
   if (!id) return undefined;
-  return activeContractMap.get(id);
+  const info = activeContractMap.get(id);
+  // ✅ If the contract's custom end date for this billboard is already expired, it is no longer an active contract.
+  if (info && info.endDate && isContractExpired(info.endDate)) {
+    return undefined;
+  }
+  return info;
 }
 
 
@@ -372,7 +400,7 @@ export const useBillboardExport = () => {
       const todayStr = new Date().toISOString().slice(0, 10);
       const { data, error } = await supabase
         .from('Contract')
-        .select('"Contract Date", "End Date"')
+        .select('"Contract Date", "End Date", billboard_prices')
         .or(`billboard_ids.ilike."%,${billboardId},%",billboard_ids.ilike."${billboardId},%",billboard_ids.ilike."%,${billboardId}",billboard_ids.eq.${billboardId}`)
         .gte('End Date', todayStr)
         .order('End Date', { ascending: false })
@@ -380,9 +408,25 @@ export const useBillboardExport = () => {
 
       if (!error && data && data.length > 0) {
         const contract = data[0] as any;
+        let customStart = '';
+        let customEnd = '';
+        if (contract.billboard_prices) {
+          try {
+            const prices = typeof contract.billboard_prices === 'string'
+              ? JSON.parse(contract.billboard_prices)
+              : contract.billboard_prices;
+            if (Array.isArray(prices)) {
+              const match = prices.find((p: any) => String(p.billboardId || p.billboard_id || '') === String(billboardId));
+              if (match) {
+                if (match.startDate) customStart = match.startDate;
+                if (match.endDate) customEnd = match.endDate;
+              }
+            }
+          } catch {}
+        }
         return {
-          startDate: contract['Contract Date'] || '',
-          endDate: contract['End Date'] || ''
+          startDate: customStart || contract['Contract Date'] || '',
+          endDate: customEnd || contract['End Date'] || ''
         };
       }
 
@@ -760,43 +804,40 @@ export const useBillboardExport = () => {
 
       // Get billboards from selected contracts with end dates
       let contractBillboardIds: string[] = [];
-      let contractEndDates: { [contractNumber: number]: string } = {};
+      let contractEndDates: { [billboardId: string]: string } = {};
+      let billboardToContract: { [billboardId: string]: number } = {};
       
       if (selectedContractIds.length > 0) {
         const { data: contractsData, error } = await supabase
           .from('Contract')
-          .select('Contract_Number, billboard_ids, "End Date"')
+          .select('Contract_Number, billboard_ids, "End Date", billboard_prices')
           .in('Contract_Number', selectedContractIds);
 
         if (!error && contractsData) {
           contractsData.forEach((contract: any) => {
             if (contract.billboard_ids) {
-              // billboard_ids is stored as comma-separated string (e.g., "6,137,108")
               const ids = String(contract.billboard_ids).split(',').map(id => id.trim()).filter(id => id);
               contractBillboardIds.push(...ids);
-            }
-            // Store end date for each contract
-            if (contract['End Date']) {
-              contractEndDates[contract.Contract_Number] = contract['End Date'];
-            }
-          });
-        }
-      }
+              
+              let billboardPricesParsed: any[] = [];
+              if (contract.billboard_prices) {
+                try {
+                  billboardPricesParsed = typeof contract.billboard_prices === 'string'
+                    ? JSON.parse(contract.billboard_prices)
+                    : contract.billboard_prices;
+                } catch {}
+              }
 
-      // Create mapping of billboard ID to contract number
-      let billboardToContract: { [billboardId: string]: number } = {};
-      if (selectedContractIds.length > 0) {
-        const { data: contractsData } = await supabase
-          .from('Contract')
-          .select('Contract_Number, billboard_ids')
-          .in('Contract_Number', selectedContractIds);
-
-        if (contractsData) {
-          contractsData.forEach((contract: any) => {
-            if (contract.billboard_ids) {
-              const ids = String(contract.billboard_ids).split(',').map(id => id.trim()).filter(id => id);
               ids.forEach(id => {
                 billboardToContract[id] = contract.Contract_Number;
+                let customEnd = '';
+                if (Array.isArray(billboardPricesParsed)) {
+                  const match = billboardPricesParsed.find((p: any) => String(p.billboardId || p.billboard_id || '') === id);
+                  if (match && match.endDate) {
+                    customEnd = match.endDate;
+                  }
+                }
+                contractEndDates[id] = customEnd || contract['End Date'] || '';
               });
             }
           });
@@ -845,7 +886,7 @@ export const useBillboardExport = () => {
           const contractNumber = billboardToContract[billboardId];
           // Only show end date if contract is NOT in hideEndDateContractIds
           if (contractNumber && !hideEndDateContractIds.includes(contractNumber)) {
-            const endDate = contractEndDates[contractNumber];
+            const endDate = contractEndDates[billboardId];
             if (endDate) {
               endDateDisplay = new Date(endDate).toLocaleDateString('ar-LY');
             }
@@ -916,29 +957,41 @@ export const useBillboardExport = () => {
 
       // Get billboards from selected contracts with end dates
       let contractBillboardIds: string[] = [];
-      let contractEndDates: { [contractNumber: number]: string } = {};
+      let contractEndDates: { [billboardId: string]: string } = {};
       let billboardToContract: { [billboardId: string]: number } = {};
       
       if (selectedContractIds.length > 0) {
         const { data: contractsData, error } = await supabase
           .from('Contract')
-          .select('Contract_Number, billboard_ids, "End Date"')
+          .select('Contract_Number, billboard_ids, "End Date", billboard_prices')
           .in('Contract_Number', selectedContractIds);
 
         if (!error && contractsData) {
           contractsData.forEach((contract: any) => {
             if (contract.billboard_ids) {
-              // billboard_ids is stored as comma-separated string (e.g., "6,137,108")
               const ids = String(contract.billboard_ids).split(',').map(id => id.trim()).filter(id => id);
               contractBillboardIds.push(...ids);
-              // Map billboard ID to contract number
+              
+              let billboardPricesParsed: any[] = [];
+              if (contract.billboard_prices) {
+                try {
+                  billboardPricesParsed = typeof contract.billboard_prices === 'string'
+                    ? JSON.parse(contract.billboard_prices)
+                    : contract.billboard_prices;
+                } catch {}
+              }
+
               ids.forEach(id => {
                 billboardToContract[id] = contract.Contract_Number;
+                let customEnd = '';
+                if (Array.isArray(billboardPricesParsed)) {
+                  const match = billboardPricesParsed.find((p: any) => String(p.billboardId || p.billboard_id || '') === id);
+                  if (match && match.endDate) {
+                    customEnd = match.endDate;
+                  }
+                }
+                contractEndDates[id] = customEnd || contract['End Date'] || '';
               });
-            }
-            // Store end date for each contract
-            if (contract['End Date']) {
-              contractEndDates[contract.Contract_Number] = contract['End Date'];
             }
           });
         }
@@ -987,7 +1040,7 @@ export const useBillboardExport = () => {
             // For selected contracts, show end date only if NOT in hideEndDateContractIds
             const contractNumber = billboardToContract[billboardId];
             if (contractNumber && !hideEndDateContractIds.includes(contractNumber)) {
-              const endDate = contractEndDates[contractNumber];
+              const endDate = contractEndDates[billboardId];
               if (endDate) {
                 endDateDisplay = new Date(endDate).toLocaleDateString('ar-LY');
               }

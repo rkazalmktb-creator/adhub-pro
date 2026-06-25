@@ -3630,8 +3630,26 @@ export default function GoogleHomeMap({
 
               // Rental data: prefer contract row, fallback to billboard fields. Use correct column names.
               const c: any = contractData || {};
-              const startRaw = c['Contract Date'] || c.start_date || c.Start_Date || bb.Rent_Start_Date || bb.rent_start_date;
-              const endRaw = c['End Date'] || c.end_date || c.End_Date || bb.Rent_End_Date || bb.rent_end_date || bb.expiryDate;
+              
+              // جلب التواريخ المخصصة للوحة إن وجدت
+              let customStartDate = '';
+              let customEndDate = '';
+              if (c && Object.keys(c).length > 0 && c.billboard_prices) {
+                try {
+                  const prices = typeof c.billboard_prices === 'string' ? JSON.parse(c.billboard_prices) : c.billboard_prices;
+                  if (Array.isArray(prices)) {
+                    const billboardIdStr = String(bb.ID || bb.id);
+                    const match = prices.find((p: any) => String(p.billboardId || p.billboard_id || '') === billboardIdStr);
+                    if (match) {
+                      if (match.startDate) customStartDate = match.startDate;
+                      if (match.endDate) customEndDate = match.endDate;
+                    }
+                  }
+                } catch {}
+              }
+
+              const startRaw = customStartDate || c['Contract Date'] || c.start_date || c.Start_Date || bb.Rent_Start_Date || bb.rent_start_date;
+              const endRaw = customEndDate || c['End Date'] || c.end_date || c.End_Date || bb.Rent_End_Date || bb.rent_end_date || bb.expiryDate;
               const customer = c['Customer Name'] || c.Customer_Name || c.customer_name || bb.Customer_Name || '';
               const adType = c['Ad Type'] || c.ad_type || bb.Ad_Type || bb.ad_type || '';
               const contractTotal = c.Total || c['Total'] || c.total_cost || c['Total Rent'] || c.Total_Rent || c.rent_cost;

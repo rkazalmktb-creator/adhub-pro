@@ -691,7 +691,12 @@ DECLARE v_composite_id uuid; v_new_total numeric;
 BEGIN
   SELECT ct.id INTO v_composite_id FROM composite_tasks ct WHERE ct.installation_task_id = (SELECT task_id FROM installation_task_items WHERE id = COALESCE(NEW.id, OLD.id) LIMIT 1);
   IF v_composite_id IS NULL THEN RETURN COALESCE(NEW, OLD); END IF;
-  SELECT COALESCE(SUM(iti.customer_installation_cost), 0) INTO v_new_total FROM installation_task_items iti JOIN installation_tasks it ON iti.task_id = it.id JOIN composite_tasks ct ON ct.installation_task_id = it.id WHERE ct.id = v_composite_id;
+  SELECT COALESCE(SUM(
+    CASE WHEN COALESCE(iti.reinstall_count, 0) > 0
+      THEN COALESCE(iti.customer_original_install_cost, 0) + COALESCE(iti.customer_reinstall_cost, iti.customer_installation_cost, 0)
+      ELSE COALESCE(iti.customer_installation_cost, 0)
+    END
+  ), 0) INTO v_new_total FROM installation_task_items iti JOIN installation_tasks it ON iti.task_id = it.id JOIN composite_tasks ct ON ct.installation_task_id = it.id WHERE ct.id = v_composite_id;
   UPDATE composite_tasks SET customer_installation_cost = v_new_total WHERE id = v_composite_id AND customer_installation_cost IS DISTINCT FROM v_new_total;
   RETURN COALESCE(NEW, OLD);
 END;

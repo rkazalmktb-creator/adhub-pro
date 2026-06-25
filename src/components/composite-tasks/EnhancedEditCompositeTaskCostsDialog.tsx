@@ -845,12 +845,16 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
   const handleSetFree = async (itemId: string) => {
     setDistributing(true);
     try {
-      await supabase.from('installation_task_items').update({ customer_installation_cost: 0 }).eq('id', itemId);
-      const newItems = taskItems.map(item => item.id === itemId ? { ...item, customer_installation_cost: 0 } : item);
+      await supabase.from('installation_task_items').update({ customer_installation_cost: 0, customer_reinstall_cost: 0 }).eq('id', itemId);
+      const newItems = taskItems.map(item => item.id === itemId ? { ...item, customer_installation_cost: 0, customer_reinstall_cost: 0 } : item);
       setTaskItems(newItems);
       let newCustomerTotal = 0, newCompanyTotal = 0;
       newItems.forEach(item => {
-        newCustomerTotal += item.customer_installation_cost || 0;
+        const isReinstalled = (item.reinstall_count || 0) > 0;
+        const itemCost = isReinstalled
+          ? (Number(item.customer_original_install_cost) || 0) + (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
+          : (Number(item.customer_installation_cost) || 0);
+        newCustomerTotal += itemCost;
         newCompanyTotal += customCompanyCosts[item.id] ?? installationPrices[item.billboard_id] ?? 0;
       });
       await updateCompositeTaskInstallationCosts(newCustomerTotal, newCompanyTotal);
@@ -893,7 +897,11 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
             await supabase.from('installation_task_items').update({ customer_installation_cost: newCost, pricing_type: 'piece', price_per_meter: 0 }).eq('id', item.id);
           }
         }
-        newCustomerTotal += newItems[idx].customer_installation_cost || 0;
+        const isReinstalled = (newItems[idx].reinstall_count || 0) > 0;
+        const itemCost = isReinstalled
+          ? (Number(newItems[idx].customer_original_install_cost) || 0) + (Number(newItems[idx].customer_reinstall_cost) || Number(newItems[idx].customer_installation_cost) || 0)
+          : (Number(newItems[idx].customer_installation_cost) || 0);
+        newCustomerTotal += itemCost;
         newCompanyTotal += installationPrices[newItems[idx].billboard_id] || 0;
       }
       setTaskItems(newItems);
@@ -924,7 +932,11 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
             await supabase.from('installation_task_items').update({ customer_installation_cost: cost, pricing_type: 'meter', price_per_meter: pricePerMeter }).eq('id', item.id);
           }
         }
-        newCustomerTotal += newItems[idx].customer_installation_cost || 0;
+        const isReinstalled = (newItems[idx].reinstall_count || 0) > 0;
+        const itemCost = isReinstalled
+          ? (Number(newItems[idx].customer_original_install_cost) || 0) + (Number(newItems[idx].customer_reinstall_cost) || Number(newItems[idx].customer_installation_cost) || 0)
+          : (Number(newItems[idx].customer_installation_cost) || 0);
+        newCustomerTotal += itemCost;
         newCompanyTotal += installationPrices[newItems[idx].billboard_id] || 0;
       }
       setTaskItems(newItems);
@@ -955,7 +967,11 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
             await supabase.from('installation_task_items').update({ customer_installation_cost: cost, pricing_type: 'meter', price_per_meter: pricePerMeter }).eq('id', item.id);
           }
         }
-        newCustomerTotal += newItems[idx].customer_installation_cost || 0;
+        const isReinstalled = (newItems[idx].reinstall_count || 0) > 0;
+        const itemCost = isReinstalled
+          ? (Number(newItems[idx].customer_original_install_cost) || 0) + (Number(newItems[idx].customer_reinstall_cost) || Number(newItems[idx].customer_installation_cost) || 0)
+          : (Number(newItems[idx].customer_installation_cost) || 0);
+        newCustomerTotal += itemCost;
         newCompanyTotal += installationPrices[newItems[idx].billboard_id] || 0;
       }
       setTaskItems(newItems);
@@ -1502,6 +1518,7 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                                               const itemPrintCostCustomer = customerPrintPerMeter * itemArea;
                                               const itemPrintCostCompany = companyPrintPerMeter * itemArea;
                                               
+                                              const isItemReinstalled = (item.reinstall_count || 0) > 0;
                                               // Inline editing panel inside the list
                                               if (editingItemId === item.id) {
                                                 return (
@@ -1542,35 +1559,82 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                                                           className="w-full"
                                                         />
                                                       </div>
-                                                      <div className="space-y-2">
-                                                        <Label className={cn("text-sm font-semibold block leading-relaxed text-right", isFirstInstallation ? 'text-muted-foreground' : 'text-primary')}>سعر الزبون (التركيب الأساسي){isFirstInstallation && <span className="text-[10px] text-blue-500 mr-1">(مقفل)</span>}</Label>
-                                                        <div className="flex gap-2 items-center">
-                                                          {isFirstInstallation ? (
-                                                            <div className="flex-1 flex items-center gap-1.5 bg-muted/40 rounded-xl px-4 h-11 border border-border/15 opacity-60 cursor-not-allowed">
-                                                              <span className="text-base font-bold font-mono text-foreground/60">{editValues.customerCost.toLocaleString('ar-LY')}</span>
-                                                              <span className="text-xs text-muted-foreground/50 mr-1">د.ل</span>
+                                                      {isItemReinstalled ? (
+                                                        <>
+                                                          <div className="space-y-2">
+                                                            <Label className="text-sm font-semibold text-primary block leading-relaxed text-right">سعر الزبون (التركيب الأصلي)</Label>
+                                                            <div className="flex gap-2 items-center">
+                                                              <InlinePriceInput 
+                                                                value={editValues.customerOriginalInstallCost}
+                                                                onChange={val => setEditValues(prev => ({...prev, customerOriginalInstallCost: val}))}
+                                                                label=""
+                                                                showLabel={false}
+                                                                className="flex-1"
+                                                              />
+                                                              <Button 
+                                                                size="sm" 
+                                                                variant="outline" 
+                                                                className="h-11 w-11 p-0 shrink-0 rounded-xl text-purple-600 border-purple-250 hover:bg-purple-50/50 transition-colors" 
+                                                                onClick={() => setEditValues(prev => ({ ...prev, customerOriginalInstallCost: 0 }))} 
+                                                                title="مجاني"
+                                                              >
+                                                                <Gift className="h-5 w-5" />
+                                                              </Button>
                                                             </div>
-                                                          ) : (
-                                                            <InlinePriceInput 
-                                                              value={editValues.customerCost}
-                                                              onChange={val => setEditValues(prev => ({...prev, customerCost: val}))}
-                                                              label=""
-                                                              showLabel={false}
-                                                              className="flex-1"
-                                                            />
-                                                          )}
-                                                          <Button 
-                                                            size="sm" 
-                                                            variant="outline" 
-                                                            className="h-11 w-11 p-0 shrink-0 rounded-xl text-purple-600 border-purple-250 hover:bg-purple-50/50 transition-colors" 
-                                                            onClick={() => setEditValues(prev => ({ ...prev, customerCost: 0 }))} 
-                                                            title="مجاني"
-                                                            disabled={isFirstInstallation}
-                                                          >
-                                                            <Gift className="h-5 w-5" />
-                                                          </Button>
+                                                          </div>
+                                                          <div className="space-y-2">
+                                                            <Label className="text-sm font-semibold text-orange-600 block leading-relaxed text-right">سعر الزبون (إعادة التركيب)</Label>
+                                                            <div className="flex gap-2 items-center">
+                                                              <InlinePriceInput 
+                                                                value={editValues.customerReinstallCost}
+                                                                onChange={val => setEditValues(prev => ({...prev, customerReinstallCost: val}))}
+                                                                label=""
+                                                                showLabel={false}
+                                                                className="flex-1"
+                                                              />
+                                                              <Button 
+                                                                size="sm" 
+                                                                variant="outline" 
+                                                                className="h-11 w-11 p-0 shrink-0 rounded-xl text-purple-600 border-purple-250 hover:bg-purple-50/50 transition-colors" 
+                                                                onClick={() => setEditValues(prev => ({ ...prev, customerReinstallCost: 0 }))} 
+                                                                title="مجاني"
+                                                              >
+                                                                <Gift className="h-5 w-5" />
+                                                              </Button>
+                                                            </div>
+                                                          </div>
+                                                        </>
+                                                      ) : (
+                                                        <div className="space-y-2">
+                                                          <Label className={cn("text-sm font-semibold block leading-relaxed text-right", isFirstInstallation ? 'text-muted-foreground' : 'text-primary')}>سعر الزبون (التركيب الأساسي){isFirstInstallation && <span className="text-[10px] text-blue-500 mr-1">(مقفل)</span>}</Label>
+                                                          <div className="flex gap-2 items-center">
+                                                            {isFirstInstallation ? (
+                                                              <div className="flex-1 flex items-center gap-1.5 bg-muted/40 rounded-xl px-4 h-11 border border-border/15 opacity-60 cursor-not-allowed">
+                                                                <span className="text-base font-bold font-mono text-foreground/60">{editValues.customerCost.toLocaleString('ar-LY')}</span>
+                                                                <span className="text-xs text-muted-foreground/50 mr-1">د.ل</span>
+                                                              </div>
+                                                            ) : (
+                                                              <InlinePriceInput 
+                                                                value={editValues.customerCost}
+                                                                onChange={val => setEditValues(prev => ({...prev, customerCost: val}))}
+                                                                label=""
+                                                                showLabel={false}
+                                                                className="flex-1"
+                                                              />
+                                                            )}
+                                                            <Button 
+                                                              size="sm" 
+                                                              variant="outline" 
+                                                              className="h-11 w-11 p-0 shrink-0 rounded-xl text-purple-600 border-purple-250 hover:bg-purple-50/50 transition-colors" 
+                                                              onClick={() => setEditValues(prev => ({ ...prev, customerCost: 0 }))} 
+                                                              title="مجاني"
+                                                              disabled={isFirstInstallation}
+                                                            >
+                                                              <Gift className="h-5 w-5" />
+                                                            </Button>
+                                                          </div>
                                                         </div>
-                                                      </div>
+                                                      )}
                                                       <div className="space-y-2">
                                                         <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed text-right">مصاريف إضافية على الشركة</Label>
                                                         <InlinePriceInput 
@@ -1739,7 +1803,22 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                                                           <div className="flex items-center gap-2 flex-wrap justify-end text-left">
                                                             <span className="text-amber-600 font-medium font-mono text-xs">{itemCompanyCost.toLocaleString('ar-LY')} د.ل (شركة)</span>
                                                             <span className="text-muted-foreground/30">•</span>
-                                                            {item.customer_installation_cost === 0 ? (
+                                                            {isItemReinstalled ? (
+                                                              <div className="flex flex-col gap-1 font-mono text-xs">
+                                                                <div className="flex items-center gap-1.5">
+                                                                  <span className="font-bold text-primary">{(item.customer_original_install_cost || 0).toLocaleString('ar-LY')} د.ل</span>
+                                                                  <span className="text-[10px] text-muted-foreground/60">(أصلي)</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5">
+                                                                  <span className="font-bold text-orange-600">{(item.customer_reinstall_cost || item.customer_installation_cost || 0).toLocaleString('ar-LY')} د.ل</span>
+                                                                  <span className="text-[10px] text-muted-foreground/60">(إعادة تركيب)</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1 border-t border-border/10 pt-1 mt-0.5">
+                                                                  <span className="font-bold text-emerald-600">{((item.customer_original_install_cost || 0) + (item.customer_reinstall_cost || item.customer_installation_cost || 0)).toLocaleString('ar-LY')} د.ل</span>
+                                                                  <span className="text-[10px] text-muted-foreground/60">(إجمالي زبون)</span>
+                                                                </div>
+                                                              </div>
+                                                            ) : item.customer_installation_cost === 0 ? (
                                                               <Badge className="bg-purple-100 text-purple-750 dark:bg-purple-950/30 dark:text-purple-300 text-xs px-2 py-0.5 font-bold rounded-lg border-none shadow-none">
                                                                 <Gift className="h-3 w-3 me-1 inline" />مجاني
                                                               </Badge>

@@ -349,9 +349,12 @@ export const useBillboardData = () => {
           });
         }
 
-        // ✅ حساب سعر الإيجار من billboard_prices إذا كان متوفراً
+        // ✅ حساب سعر الإيجار والتواريخ من billboard_prices إذا كان متوفراً
         let billboardRentPrice = billboard.Price || 0;
         let billboardRentPriceGross = billboard.Price || 0;
+        let customStartDate = '';
+        let customEndDate = '';
+
         if (activeContract?.billboard_prices) {
           try {
             const pricesData = typeof activeContract.billboard_prices === 'string'
@@ -367,6 +370,10 @@ export const useBillboardData = () => {
                 billboardRentPrice = priceEntry.finalPrice || priceEntry.priceAfterDiscount || priceEntry.totalBillboardPrice || priceEntry.contractPrice || priceEntry.price || billboard.Price || 0;
                 // السعر قبل الخصم
                 billboardRentPriceGross = priceEntry.contractPrice || priceEntry.priceBeforeDiscount || priceEntry.basePriceBeforeDiscount || billboardRentPrice;
+                
+                // جلب التواريخ المخصصة للوحة إن وجدت
+                if (priceEntry.startDate) customStartDate = priceEntry.startDate;
+                if (priceEntry.endDate) customEndDate = priceEntry.endDate;
               }
             }
           } catch (e) {
@@ -406,8 +413,8 @@ export const useBillboardData = () => {
           clientName: activeContract?.['Customer Name'] || billboard.Customer_Name || '',
           Ad_Type: activeContract?.['Ad Type'] || billboard.Ad_Type || '',
           adType: activeContract?.['Ad Type'] || billboard.Ad_Type || '',
-          Rent_Start_Date: activeContract?.['Contract Date'] || billboard.Rent_Start_Date || null,
-          Rent_End_Date: activeContract?.['End Date'] || billboard.Rent_End_Date || null,
+          Rent_Start_Date: customStartDate || activeContract?.['Contract Date'] || billboard.Rent_Start_Date || null,
+          Rent_End_Date: customEndDate || activeContract?.['End Date'] || billboard.Rent_End_Date || null,
           ContractStatus: billboard.Status || null,
           // ✅ FIXED: Map faces count correctly from database column
           Faces: billboard.Faces_Count || 1,
@@ -429,12 +436,13 @@ export const useBillboardData = () => {
             id: activeContract.Contract_Number,
             customer_name: activeContract['Customer Name'],
             ad_type: activeContract['Ad Type'],
-            start_date: activeContract['Contract Date'],
-            end_date: activeContract['End Date'],
+            start_date: customStartDate || activeContract['Contract Date'],
+            end_date: customEndDate || activeContract['End Date'],
             rent_cost: billboardRentPrice,
             rent_cost_gross: billboardRentPriceGross
           } : null
         };
+
       });
 
       // ✅ Sort billboards by database size order

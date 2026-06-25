@@ -852,7 +852,11 @@ function generateSummarySection(task: CompositeTaskWithDetails, details: any, in
     // ✅ احتساب تكلفة القص لكل عنصر باستخدام السعر الفردي عند توفره
     const cutoutCost = calculateCutoutCostForItems(group.items, cutoutPricePerUnit, details);
     const installCost = isInstallationOnly ? group.items.reduce((sum: number, item: any) => {
-      return sum + (item.customer_installation_cost || installationCostPerItem);
+      const isReinstalled = (item.reinstall_count || 0) > 0;
+      const itemCost = isReinstalled
+        ? (Number(item.customer_original_install_cost) || 0) + (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
+        : (item.customer_installation_cost || installationCostPerItem);
+      return sum + itemCost;
     }, 0) : 0;
     const totalItemCost = printCost + cutoutCost + installCost;
 
@@ -1208,7 +1212,11 @@ function generateInvoiceHTML(task: CompositeTaskWithDetails, details: any, showD
       rows = groupedItems.map((group: any, idx: number) => {
         // حساب إجمالي تكلفة التركيب للمجموعة - التكلفة الفعلية لكل عنصر
         const totalInstallCost = group.items.reduce((sum: number, item: any) => {
-          return sum + (item.customer_installation_cost || installationCostPerItem);
+          const isReinstalled = (item.reinstall_count || 0) > 0;
+          const itemCost = isReinstalled
+            ? (Number(item.customer_original_install_cost) || 0) + (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
+            : (item.customer_installation_cost || installationCostPerItem);
+          return sum + itemCost;
         }, 0);
         
         // عرض التصاميم المختلفة

@@ -189,6 +189,10 @@ export interface BillboardPrintData {
   isReplacement?: boolean;
   replacementStartDate?: string;
   replacedBillboardName?: string;
+  isEndDateCustom?: boolean;
+  customStartDate?: string;
+  customEndDate?: string;
+  customStartDateReason?: string;
 }
 
 export interface UnifiedPrintOptions {
@@ -837,7 +841,29 @@ function buildTablePageHTML(
               </div>
             `;
           } else {
-            cellContent = formattedEndDate || row.rent_end_date || '';
+            cellContent = `
+              <div style="font-weight: ${row.isEndDateCustom ? 'bold' : 'normal'};">
+                ${formattedEndDate || row.rent_end_date || ''}
+              </div>
+              ${row.isEndDateCustom ? `
+                <div style="
+                  font-size: 16px;
+                  color: #b8860b;
+                  background: #fdfbf7;
+                  border: 1px solid #e6d3a5;
+                  padding: 2px 6px;
+                  border-radius: 4px;
+                  display: inline-block;
+                  margin-top: 4px;
+                  font-weight: bold;
+                  font-family: 'Doran', 'Tajawal', sans-serif;
+                  line-height: 1;
+                  white-space: nowrap;
+                ">
+                  تاريخ مخصص
+                </div>
+              ` : ''}
+            `;
           }
           break;
         }
@@ -1086,16 +1112,32 @@ export async function generateUnifiedPrintHTML(options: UnifiedPrintOptions): Pr
           color-adjust: exact !important; 
         }
 
+        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&family=Noto+Sans+Arabic:wght@400;700;900&family=Manrope:wght@400;600;700&display=swap');
+
         @font-face {
           font-family: 'Doran';
-          src: url('/Doran-Regular.otf') format('opentype');
+          src: url('${origin}/Doran-Regular.otf') format('opentype');
           font-weight: 400;
           font-style: normal;
           font-display: swap;
         }
         @font-face {
           font-family: 'Doran';
-          src: url('/Doran-Bold.otf') format('opentype');
+          src: url('${origin}/Doran-Bold.otf') format('opentype');
+          font-weight: 700;
+          font-style: normal;
+          font-display: swap;
+        }
+        @font-face {
+          font-family: 'Manrope';
+          src: url('${origin}/Manrope-Regular.otf') format('opentype');
+          font-weight: 400;
+          font-style: normal;
+          font-display: swap;
+        }
+        @font-face {
+          font-family: 'Manrope';
+          src: url('${origin}/Manrope-Bold.otf') format('opentype');
           font-weight: 700;
           font-style: normal;
           font-display: swap;
