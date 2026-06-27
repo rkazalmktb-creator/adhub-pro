@@ -1729,23 +1729,40 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
 
             {/* معلومات العقد المنتهي للمدير فقط */}
             {isAdmin && contractExpired && (contractId || endDate || customerName) && (
-              <div className="p-4 rounded-xl bg-gradient-to-br from-rose-500/10 to-red-500/5 border border-rose-500/20">
-                <div className="flex items-center gap-2 mb-3">
-                  <FileText className="h-4 w-4 text-rose-600" />
-                  <span className="font-semibold text-sm text-rose-600 dark:text-rose-400">عقد منتهي</span>
+              <div className="p-3.5 rounded-xl bg-rose-50/60 dark:bg-rose-950/20 border border-rose-200/50 dark:border-rose-900/40 space-y-2.5">
+                <div className="flex items-center justify-between pb-1.5 border-b border-rose-200/40 dark:border-rose-900/20">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-rose-500 dark:text-rose-400" />
+                    <span className="font-bold text-xs text-rose-700 dark:text-rose-300">تفاصيل العقد المنتهي</span>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100/80 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 font-extrabold shadow-xs border border-rose-200 dark:border-rose-900/50">
+                    منتهي
+                  </span>
                 </div>
-                <div className="flex flex-wrap gap-2 text-xs">
+                <div className="grid grid-cols-2 gap-2 text-xs">
                   {contractId && (
-                    <Badge variant="outline" className="text-rose-600 border-rose-300">رقم العقد: {contractId}</Badge>
+                    <div className="flex flex-col p-2 rounded-lg bg-white/70 dark:bg-black/20 border border-rose-100/40 dark:border-rose-900/10 shadow-xs">
+                      <span className="text-[10px] text-rose-600/90 dark:text-rose-400/90 font-semibold">رقم العقد</span>
+                      <span className="font-extrabold text-rose-950 dark:text-rose-100 mt-0.5">{contractId}</span>
+                    </div>
                   )}
                   {endDate && (
-                    <Badge className="bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300">انتهى: {formatLongArabicDate(endDate)}</Badge>
+                    <div className="flex flex-col p-2 rounded-lg bg-white/70 dark:bg-black/20 border border-rose-100/40 dark:border-rose-900/10 shadow-xs">
+                      <span className="text-[10px] text-rose-600/90 dark:text-rose-400/90 font-semibold">تاريخ الانتهاء</span>
+                      <span className="font-extrabold text-rose-950 dark:text-rose-100 mt-0.5">{formatLongArabicDate(endDate)}</span>
+                    </div>
                   )}
                   {customerName && (
-                    <Badge variant="outline" className="text-rose-600 border-rose-300">{customerName}</Badge>
+                    <div className="flex flex-col p-2 rounded-lg bg-white/70 dark:bg-black/20 border border-rose-100/40 dark:border-rose-900/10 shadow-xs col-span-2">
+                      <span className="text-[10px] text-rose-600/90 dark:text-rose-400/90 font-semibold">الزبون</span>
+                      <span className="font-extrabold text-rose-950 dark:text-rose-100 mt-0.5">{customerName}</span>
+                    </div>
                   )}
                   {adType && (
-                    <Badge variant="outline" className="text-rose-600 border-rose-300">نوع الإعلان: {adType}</Badge>
+                    <div className="flex flex-col p-2 rounded-lg bg-white/70 dark:bg-black/20 border border-rose-100/40 dark:border-rose-900/10 shadow-xs col-span-2">
+                      <span className="text-[10px] text-rose-600/90 dark:text-rose-400/90 font-semibold">نوع الإعلان</span>
+                      <span className="font-extrabold text-rose-950 dark:text-rose-100 mt-0.5">{adType}</span>
+                    </div>
                   )}
                 </div>
               </div>

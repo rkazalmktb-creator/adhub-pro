@@ -15,6 +15,14 @@ import { Input } from '@/components/ui/input';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
@@ -31,17 +39,17 @@ import {
   Navigation, 
   ZoomIn, 
   Printer, 
-  CheckSquare, 
+  CheckSquare,
   Square,
   X,
-  Search,
-  Filter,
   Trash2,
   Camera,
   BarChart3,
   MessageCircle,
   RotateCcw,
-  Merge
+  Merge,
+  Wrench,
+  ShieldAlert
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BillboardBulkPrintDialog } from '@/components/billboards/BillboardBulkPrintDialog';
@@ -159,10 +167,6 @@ export default function RemovalTasks() {
   } | null>(null);
   const [billboardPrintOpen, setBillboardPrintOpen] = useState(false);
   const [selectedPrintTeam, setSelectedPrintTeam] = useState<string>('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [filterTeam, setFilterTeam] = useState<string>('all');
-  const [showPendingOnly, setShowPendingOnly] = useState(false);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'pending' | 'completed'>('pending');
   
@@ -215,7 +219,7 @@ export default function RemovalTasks() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('Contract')
-        .select('Contract_Number, "Customer Name", billboard_ids, "Ad Type", "Contract Date", "End Date"')
+        .select('Contract_Number, "Customer Name", billboard_ids, "Ad Type", "Contract Date", "End Date", design_data')
         .lte('"End Date"', new Date().toISOString())
         .gte('"End Date"', '2025-10-01')
         .order('Contract_Number', { ascending: false })
@@ -323,7 +327,7 @@ export default function RemovalTasks() {
           continue;
         }
 
-        // ✅ تصفية اللوحات: فقط المنتهي عقدها وغير المؤجرة حالياً لعقد ساري آخر
+        // ✅ تصفية اللوحات: فقط غير الموجودة في مهام معلقة وغير المؤجرة حالياً لعقد ساري آخر
         const availableBillboards = contractBillboards.filter(billboard => {
           // استبعاد اللوحات الموجودة بالفعل في مهام معلقة
           if (billboardsInPendingTasks.has(billboard.ID)) return false;
@@ -331,13 +335,7 @@ export default function RemovalTasks() {
           // ✅ استبعاد اللوحات المؤجرة في عقود نشطة أخرى
           if (billboardsInActiveContracts.has(billboard.ID)) return false;
           
-          const rentEndDate = billboard.Rent_End_Date;
-          
-          // ✅ إذا كانت اللوحة من نفس العقد المنتهي
-          if (!rentEndDate) return false;
-          const endDate = new Date(rentEndDate);
-          endDate.setHours(0, 0, 0, 0);
-          return endDate <= today; // العقد منتهي إذا تاريخ نهايته اليوم أو قبله
+          return true;
         });
 
         // ضع علامة على أنه تم معالجة هذا العقد
@@ -404,14 +402,35 @@ export default function RemovalTasks() {
               .limit(1)
               .maybeSingle();
 
+            let designFaceA = installationItems?.design_face_a || null;
+            let designFaceB = installationItems?.design_face_b || null;
+
+            // جلب التصاميم من العقد كـ fallback إذا لم تتوفر في مهام التركيب
+            if ((!designFaceA || !designFaceB) && contract.design_data) {
+              try {
+                const dd = typeof contract.design_data === 'string'
+                  ? JSON.parse(contract.design_data) : contract.design_data;
+                const arr = typeof dd === 'string' ? JSON.parse(dd) : dd;
+                if (Array.isArray(arr)) {
+                  const match = arr.find((d: any) => String(d.billboardId) === String(billboardId));
+                  if (match) {
+                    if (!designFaceA) designFaceA = match.designFaceA || match.design_face_a_url || null;
+                    if (!designFaceB) designFaceB = match.designFaceB || match.design_face_b_url || null;
+                  }
+                }
+              } catch (e) {
+                console.error("Error parsing contract design_data for auto removal:", e);
+              }
+            }
+
             await supabase
               .from('removal_task_items')
               .insert({
                 task_id: taskId,
                 billboard_id: billboardId,
                 status: 'pending',
-                design_face_a: installationItems?.design_face_a || null,
-                design_face_b: installationItems?.design_face_b || null,
+                design_face_a: designFaceA,
+                design_face_b: designFaceB,
                 installed_image_url: installationItems?.installed_image_url || null
               });
           }
@@ -456,40 +475,23 @@ export default function RemovalTasks() {
         
         if (activeItems.length === 0) return;
         
-        // جلب بيانات اللوحات
-        const billboardIds = activeItems.map(item => item.billboard_id);
-        const { data: billboards } = await supabase
-          .from('billboards')
-          .select('ID, Status, Contract_Number, Rent_End_Date')
-          .in('ID', billboardIds);
+        // جلب جميع العقود النشطة للتحقق من اللوحات المؤجرة حالياً
+        const { data: activeContracts } = await supabase
+          .from('Contract')
+          .select('billboard_ids')
+          .gt('"End Date"', todayStr);
         
-        if (!billboards) return;
+        const rentedBillboardIds = new Set<number>();
+        (activeContracts || []).forEach(contract => {
+          if (contract.billboard_ids) {
+            const ids = contract.billboard_ids.split(',').map((id: string) => parseInt(id.trim())).filter(Boolean);
+            ids.forEach((id: number) => rentedBillboardIds.add(id));
+          }
+        });
         
-        // تحديد اللوحات المؤجرة حالياً
-        const rentedBillboardIds = billboards
-          .filter(b => {
-            const status = (b.Status || '').toString().trim();
-            const rentEndDate = b.Rent_End_Date;
-            
-            // إذا كانت مؤجرة أو محجوزة مع عقد نشط
-            if (status === 'مؤجر' || status === 'rented' || status === 'محجوز' || status === 'Rented') {
-              if (rentEndDate) {
-                const endDate = new Date(rentEndDate);
-                endDate.setHours(0, 0, 0, 0);
-                return endDate > today; // لا يزال نشطاً
-              }
-              // إذا لا يوجد تاريخ انتهاء لكن الحالة مؤجر، نعتبره نشط
-              if (b.Contract_Number) return true;
-            }
-            return false;
-          })
-          .map(b => b.ID);
-        
-        if (rentedBillboardIds.length === 0) return;
-        
-        // حذف عناصر الإزالة للوحات المؤجرة
+        // حذف عناصر الإزالة للوحات المؤجرة في عقود نشطة أخرى
         const itemsToDelete = activeItems
-          .filter(item => rentedBillboardIds.includes(item.billboard_id))
+          .filter(item => rentedBillboardIds.has(item.billboard_id))
           .map(item => item.id);
         
         if (itemsToDelete.length > 0) {
@@ -499,9 +501,28 @@ export default function RemovalTasks() {
             .in('id', itemsToDelete);
           
           console.log(`✅ تم حذف ${itemsToDelete.length} لوحة مؤجرة من مهام الإزالة`);
-          queryClient.invalidateQueries({ queryKey: ['all-removal-task-items'] });
-          queryClient.invalidateQueries({ queryKey: ['removal-tasks'] });
         }
+
+        // تنظيف المهام الفارغة (التي لا تحتوي على أي لوحات) تلقائياً
+        const { data: allTasks } = await supabase
+          .from('removal_tasks')
+          .select('id');
+        const { data: allItems } = await supabase
+          .from('removal_task_items')
+          .select('task_id');
+        const tasksWithItems = new Set(allItems?.map(i => i.task_id).filter(Boolean) || []);
+        const emptyTaskIds = (allTasks || []).map(t => t.id).filter(id => !tasksWithItems.has(id));
+        
+        if (emptyTaskIds.length > 0) {
+          await supabase
+            .from('removal_tasks')
+            .delete()
+            .in('id', emptyTaskIds);
+          console.log(`🧹 تم تنظيف ${emptyTaskIds.length} مهمة إزالة فارغة`);
+        }
+
+        queryClient.invalidateQueries({ queryKey: ['all-removal-task-items'] });
+        queryClient.invalidateQueries({ queryKey: ['removal-tasks'] });
       } catch (error) {
         console.error('خطأ في تنظيف اللوحات المؤجرة:', error);
       }
@@ -509,6 +530,43 @@ export default function RemovalTasks() {
 
     createAutoRemovalTasks();
   }, [expiredContracts?.length, teams?.length]);
+
+  // تنظيف المهام الفارغة (التي لا تحتوي على أي لوحات) تلقائياً عند تحميل الصفحة
+  useEffect(() => {
+    const cleanupEmptyTasks = async () => {
+      try {
+        const { data: allTasks } = await supabase
+          .from('removal_tasks')
+          .select('id');
+        
+        const { data: allItems } = await supabase
+          .from('removal_task_items')
+          .select('task_id');
+        
+        if (!allTasks) return;
+        
+        const tasksWithItems = new Set(allItems?.map(i => i.task_id).filter(Boolean) || []);
+        const emptyTaskIds = allTasks.map(t => t.id).filter(id => !tasksWithItems.has(id));
+        
+        if (emptyTaskIds.length > 0) {
+          const { error } = await supabase
+            .from('removal_tasks')
+            .delete()
+            .in('id', emptyTaskIds);
+            
+          if (!error) {
+            console.log(`🧹 تم تنظيف ${emptyTaskIds.length} مهمة إزالة فارغة من الصفحة`);
+            queryClient.invalidateQueries({ queryKey: ['removal-tasks'] });
+            queryClient.invalidateQueries({ queryKey: ['all-removal-task-items'] });
+          }
+        }
+      } catch (error) {
+        console.error('خطأ أثناء تنظيف المهام الفارغة:', error);
+      }
+    };
+    
+    cleanupEmptyTasks();
+  }, []);
 
   // جلب العقود المنتهية من شهر 10/2025
   // جلب العقود المنتهية وإنشاء مهام تلقائية
@@ -997,44 +1055,23 @@ export default function RemovalTasks() {
         throw new Error('لا توجد عناصر في مهام نشطة');
       }
       
-      // جلب بيانات اللوحات
-      const billboardIds = activeItems.map(item => item.billboard_id);
-      const { data: billboards } = await supabase
-        .from('billboards')
-        .select('ID, Status, Contract_Number, Rent_End_Date')
-        .in('ID', billboardIds);
+      // جلب جميع العقود النشطة للتحقق من اللوحات المؤجرة حالياً
+      const { data: activeContracts } = await supabase
+        .from('Contract')
+        .select('billboard_ids')
+        .gt('"End Date"', todayStr);
       
-      if (!billboards) {
-        throw new Error('لم يتم العثور على اللوحات');
-      }
-      
-      // تحديد اللوحات المؤجرة حالياً
-      const rentedBillboardIds = billboards
-        .filter(b => {
-          const status = (b.Status || '').toString().trim();
-          const rentEndDate = b.Rent_End_Date;
-          
-          // إذا كانت مؤجرة أو محجوزة مع عقد نشط
-          if (status === 'مؤجر' || status === 'rented' || status === 'محجوز' || status === 'Rented') {
-            if (rentEndDate) {
-              const endDate = new Date(rentEndDate);
-              endDate.setHours(0, 0, 0, 0);
-              return endDate >= today; // لا يزال نشطاً
-            }
-            // إذا لا يوجد تاريخ انتهاء لكن الحالة مؤجر، نعتبره نشط
-            if (b.Contract_Number) return true;
-          }
-          return false;
-        })
-        .map(b => b.ID);
-      
-      if (rentedBillboardIds.length === 0) {
-        throw new Error('لا توجد لوحات مؤجرة في مهام الإزالة');
-      }
+      const rentedBillboardIds = new Set<number>();
+      (activeContracts || []).forEach(contract => {
+        if (contract.billboard_ids) {
+          const ids = contract.billboard_ids.split(',').map((id: string) => parseInt(id.trim())).filter(Boolean);
+          ids.forEach((id: number) => rentedBillboardIds.add(id));
+        }
+      });
       
       // حذف عناصر الإزالة للوحات المؤجرة
       const itemsToDelete = activeItems
-        .filter(item => rentedBillboardIds.includes(item.billboard_id))
+        .filter(item => rentedBillboardIds.has(item.billboard_id))
         .map(item => item.id);
       
       if (itemsToDelete.length > 0) {
@@ -1044,6 +1081,23 @@ export default function RemovalTasks() {
           .in('id', itemsToDelete);
         
         if (error) throw error;
+      }
+
+      // تنظيف المهام الفارغة (التي لا تحتوي على أي لوحات)
+      const { data: allTasks } = await supabase
+        .from('removal_tasks')
+        .select('id');
+      const { data: allItems } = await supabase
+        .from('removal_task_items')
+        .select('task_id');
+      const tasksWithItems = new Set(allItems?.map(i => i.task_id).filter(Boolean) || []);
+      const emptyTaskIds = (allTasks || []).map(t => t.id).filter(id => !tasksWithItems.has(id));
+      
+      if (emptyTaskIds.length > 0) {
+        await supabase
+          .from('removal_tasks')
+          .delete()
+          .in('id', emptyTaskIds);
       }
       
       return itemsToDelete.length;
@@ -1115,7 +1169,7 @@ export default function RemovalTasks() {
     mutationFn: async ({ contractId, taskIds }: { contractId: number; taskIds: string[] }) => {
       const { data: contract } = await supabase
         .from('Contract')
-        .select('billboard_ids')
+        .select('billboard_ids, design_data')
         .eq('Contract_Number', contractId)
         .single();
       
@@ -1180,12 +1234,45 @@ export default function RemovalTasks() {
           createdTasksMap.set(mapKey, targetTaskId);
         }
         
+        // جلب صور التصميم من آخر مهمة تركيب للوحة
+        const { data: installationItems } = await supabase
+          .from('installation_task_items')
+          .select('design_face_a, design_face_b, installed_image_url')
+          .eq('billboard_id', bb.ID)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        let designFaceA = installationItems?.design_face_a || null;
+        let designFaceB = installationItems?.design_face_b || null;
+
+        // جلب التصاميم من العقد كـ fallback إذا لم تتوفر في مهام التركيب
+        if ((!designFaceA || !designFaceB) && contract?.design_data) {
+          try {
+            const dd = typeof contract.design_data === 'string'
+              ? JSON.parse(contract.design_data) : contract.design_data;
+            const arr = typeof dd === 'string' ? JSON.parse(dd) : dd;
+            if (Array.isArray(arr)) {
+              const match = arr.find((d: any) => String(d.billboardId) === String(bb.ID));
+              if (match) {
+                if (!designFaceA) designFaceA = match.designFaceA || match.design_face_a_url || null;
+                if (!designFaceB) designFaceB = match.designFaceB || match.design_face_b_url || null;
+              }
+            }
+          } catch (e) {
+            console.error("Error parsing contract design_data for sync:", e);
+          }
+        }
+
         const { error: insertError } = await supabase
           .from('removal_task_items')
           .insert({
             task_id: targetTaskId,
             billboard_id: bb.ID,
             status: 'pending',
+            design_face_a: designFaceA,
+            design_face_b: designFaceB,
+            installed_image_url: installationItems?.installed_image_url || null
           });
         
         if (!insertError) addedCount++;
@@ -1668,7 +1755,8 @@ export default function RemovalTasks() {
     return grouped;
   }, [allTaskItems]);
 
-  const tasksByTeam = useMemo(() => {
+  // تجميع المهام حسب الفريق مباشرةً من tasks الخام (يُستخدم في نوافذ الطباعة والواتساب)
+  const tasksByTeamForPrint = useMemo(() => {
     const grouped: Record<string, RemovalTask[]> = {};
     tasks.forEach(task => {
       const teamId = task.team_id || 'unknown';
@@ -1679,67 +1767,6 @@ export default function RemovalTasks() {
     });
     return grouped;
   }, [tasks]);
-
-  const filteredTasks = useMemo(() => {
-    let filtered = tasks;
-
-    if (filterStatus !== 'all') {
-      filtered = filtered.filter(task => task.status === filterStatus);
-    }
-
-    if (filterTeam !== 'all') {
-      filtered = filtered.filter(task => task.team_id === filterTeam);
-    }
-
-    if (searchTerm.trim()) {
-      const searchLower = searchTerm.toLowerCase();
-      filtered = filtered.filter(task => {
-        const contract = contractByNumber[task.contract_id];
-        return (
-          String(task.contract_id).includes(searchLower) ||
-          contract?.['Customer Name']?.toLowerCase().includes(searchLower) ||
-          contract?.['Ad Type']?.toLowerCase().includes(searchLower)
-        );
-      });
-    }
-
-    if (showPendingOnly) {
-      filtered = filtered.filter(task => {
-        const items = itemsByTask[task.id] || [];
-        return items.some(item => item.status === 'pending');
-      });
-    }
-
-    return filtered;
-  }, [tasks, filterStatus, filterTeam, searchTerm, contractByNumber, showPendingOnly, itemsByTask]);
-
-  const filteredTasksByTeam = useMemo(() => {
-    const grouped: Record<string, RemovalTask[]> = {};
-    filteredTasks.forEach(task => {
-      const teamId = task.team_id || 'unknown';
-      if (!grouped[teamId]) {
-        grouped[teamId] = [];
-      }
-      grouped[teamId].push(task);
-    });
-    return grouped;
-  }, [filteredTasks]);
-
-  const filteredSortedTeams = useMemo(() => {
-    return Object.keys(filteredTasksByTeam).sort((a, b) => {
-      const tasksA = filteredTasksByTeam[a] || [];
-      const tasksB = filteredTasksByTeam[b] || [];
-      
-      const latestA = tasksA.length > 0 
-        ? Math.max(...tasksA.map(t => new Date(t.created_at).getTime()))
-        : 0;
-      const latestB = tasksB.length > 0 
-        ? Math.max(...tasksB.map(t => new Date(t.created_at).getTime()))
-        : 0;
-      
-      return latestB - latestA;
-    });
-  }, [filteredTasksByTeam]);
 
   const toggleSelectAll = (taskId: string) => {
     const taskItems = itemsByTask[taskId] || [];
@@ -1808,30 +1835,24 @@ export default function RemovalTasks() {
         }}
       />
 
-      <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-card/45 backdrop-blur-md border border-border/30 rounded-[22px] p-5 shadow-lg select-none">
-        <div className="space-y-1 text-right">
-          <h1 className="text-3xl font-black tracking-tight text-foreground bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text">
-            مهام إزالة الدعاية
-          </h1>
-          <p className="text-xs font-medium text-muted-foreground/80">
-            إدارة ومتابعة مهام إزالة الدعاية لللوحات المنتهي عقدها
-          </p>
+      <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-card/45 backdrop-blur-md border border-[#d6ac40]/25 rounded-[22px] p-5 shadow-lg shadow-[#d6ac40]/5 select-none">
+        <div className="space-y-1.5 text-right flex items-center gap-3">
+          <div className="h-12 w-1.5 rounded-full bg-gradient-to-b from-[#d6ac40] to-[#b8860b]" aria-hidden="true" />
+          <div className="space-y-1">
+            <h1 className="text-3xl font-black tracking-tight bg-gradient-to-r from-[#d6ac40] to-[#b8860b] bg-clip-text text-transparent">
+              مهام إزالة الدعاية
+            </h1>
+            <p className="text-xs font-medium text-muted-foreground/80">
+              إدارة ومتابعة مهام إزالة الدعاية للوحات المنتهي عقدها
+            </p>
+          </div>
         </div>
-        
-        <div className="flex flex-wrap items-center gap-2 mr-auto" onClick={e => e.stopPropagation()}>
-          <Button 
-            onClick={() => setStatsDialogOpen(true)} 
-            variant="outline" 
-            size="sm"
-            className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-background/50 border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/40 hover:border-primary/30 transition-all hover:scale-[1.02]"
-          >
-            <BarChart3 className="h-3.5 w-3.5 text-blue-500" />
-            تقرير الإحصائيات
-          </Button>
 
+        <div className="flex flex-wrap items-center gap-2 mr-auto" onClick={e => e.stopPropagation()}>
+          {/* إجراء سياقي: يظهر فقط عند تحديد مهام */}
           {selectedTasks.size > 0 && (
             <>
-              <Button 
+              <Button
                 onClick={async () => {
                   if (!confirm(`هل تريد دمج ${selectedTasks.size} مهام مختارة؟`)) return;
                   try {
@@ -1886,76 +1907,111 @@ export default function RemovalTasks() {
                   } catch (error: any) {
                     toast.error('فشل دمج المهام: ' + error.message);
                   }
-                }} 
-                variant="outline"
+                }}
                 size="sm"
-                className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-background/50 border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/40 hover:border-primary/30 transition-all hover:scale-[1.02]"
+                className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-[#d6ac40]/15 text-[#b8860b] border border-[#d6ac40]/40 hover:bg-[#d6ac40]/25 hover:border-[#d6ac40]/60 cursor-pointer transition-all duration-200 hover:scale-[1.02]"
               >
+                <Merge className="h-3.5 w-3.5" />
                 دمج {selectedTasks.size} مهام
               </Button>
 
               <Button
                 onClick={() => setSendTeamDialogOpen(true)}
-                variant="outline"
                 size="sm"
-                className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-background/50 border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/40 hover:border-primary/30 transition-all hover:scale-[1.02]"
+                className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-emerald-500/15 text-emerald-600 border border-emerald-500/40 hover:bg-emerald-500/25 hover:border-emerald-500/60 cursor-pointer transition-all duration-200 hover:scale-[1.02]"
               >
-                <MessageCircle className="h-3.5 w-3.5 text-emerald-500" />
+                <MessageCircle className="h-3.5 w-3.5" />
                 إرسال للفرق
               </Button>
+
+              <div className="w-px h-7 bg-border/40 mx-0.5" aria-hidden="true" />
             </>
           )}
 
-          {duplicateTasksCount > 0 && (
-            <Button 
-              onClick={() => cleanupDuplicatesMutation.mutate()}
-              disabled={cleanupDuplicatesMutation.isPending}
-              variant="destructive"
-              size="sm"
-              className="gap-2 rounded-xl px-4 h-10 text-xs font-black bg-red-500/10 text-red-400 border border-red-500/25 hover:bg-red-500/20 hover:border-red-500/40 transition-all hover:scale-[1.02]"
-            >
-              <Trash2 className="h-3.5 w-3.5 animate-pulse" />
-              حذف {duplicateTasksCount} مكررة
-            </Button>
-          )}
-
-          <Button 
-            onClick={() => cleanupRentedMutation.mutate()}
-            disabled={cleanupRentedMutation.isPending}
+          {/* إجراء ثانوي: تقرير الإحصائيات */}
+          <Button
+            onClick={() => setStatsDialogOpen(true)}
             variant="outline"
             size="sm"
-            className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-background/50 border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/40 hover:border-primary/30 transition-all hover:scale-[1.02]"
+            className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-background/50 border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/40 hover:border-[#d6ac40]/40 cursor-pointer transition-all duration-200 hover:scale-[1.02]"
           >
-            <Trash2 className="h-3.5 w-3.5 text-rose-500" />
-            تنظيف المؤجرة
+            <BarChart3 className="h-3.5 w-3.5 text-[#b8860b]" />
+            تقرير الإحصائيات
           </Button>
 
-          <Button 
-            onClick={() => redistributeRemovalMutation.mutate()}
-            disabled={redistributeRemovalMutation.isPending}
-            variant="outline"
+          {/* قائمة أدوات الصيانة: تجميع الإجراءات الثانوية */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-background/50 border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/40 hover:border-[#d6ac40]/40 cursor-pointer transition-all duration-200 hover:scale-[1.02]"
+              >
+                <Wrench className="h-3.5 w-3.5 text-[#b8860b]" />
+                أدوات الصيانة
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-60 rounded-xl">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">أدوات تنظيم وصيانة المهام</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => cleanupRentedMutation.mutate()}
+                disabled={cleanupRentedMutation.isPending}
+                className="gap-2.5 cursor-pointer rounded-lg focus:bg-[#d6ac40]/10"
+              >
+                <Trash2 className="h-4 w-4 text-rose-500" />
+                <div className="flex flex-col">
+                  <span className="text-xs font-semibold">تنظيف المؤجرة</span>
+                  <span className="text-[10px] text-muted-foreground">حذف مهام اللوحات المؤجرة</span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => redistributeRemovalMutation.mutate()}
+                disabled={redistributeRemovalMutation.isPending}
+                className="gap-2.5 cursor-pointer rounded-lg focus:bg-[#d6ac40]/10"
+              >
+                <RotateCcw className="h-4 w-4 text-amber-500" />
+                <div className="flex flex-col">
+                  <span className="text-xs font-semibold">إعادة التوزيع</span>
+                  <span className="text-[10px] text-muted-foreground">توزيع المهام على الفرق</span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => mergeRemovalTasksMutation.mutate()}
+                disabled={mergeRemovalTasksMutation.isPending}
+                className="gap-2.5 cursor-pointer rounded-lg focus:bg-[#d6ac40]/10"
+              >
+                <Merge className="h-4 w-4 text-indigo-500" />
+                <div className="flex flex-col">
+                  <span className="text-xs font-semibold">تجميع المهام</span>
+                  <span className="text-[10px] text-muted-foreground">دمج مهام الفريق الواحد</span>
+                </div>
+              </DropdownMenuItem>
+              {duplicateTasksCount > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => cleanupDuplicatesMutation.mutate()}
+                    disabled={cleanupDuplicatesMutation.isPending}
+                    className="gap-2.5 cursor-pointer rounded-lg focus:bg-red-500/10"
+                  >
+                    <ShieldAlert className="h-4 w-4 text-red-500 animate-pulse" />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-red-500">حذف {duplicateTasksCount} مهمة مكررة</span>
+                      <span className="text-[10px] text-muted-foreground">تنظيف تلقائي للمكررات</span>
+                    </div>
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* إجراء أساسي: إزالة يدوية */}
+          <Button
+            onClick={() => setManualOpen(true)}
             size="sm"
-            className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-background/50 border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/40 hover:border-primary/30 transition-all hover:scale-[1.02]"
-          >
-            <RotateCcw className="h-3.5 w-3.5 text-amber-500" />
-            إعادة توزيع
-          </Button>
-
-          <Button 
-            onClick={() => mergeRemovalTasksMutation.mutate()}
-            disabled={mergeRemovalTasksMutation.isPending}
-            variant="outline"
-            size="sm"
-            className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-background/50 border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/40 hover:border-primary/30 transition-all hover:scale-[1.02]"
-          >
-            <Merge className="h-3.5 w-3.5 text-indigo-500" />
-            تجميع المهام
-          </Button>
-
-          <Button 
-            onClick={() => setManualOpen(true)} 
-            size="sm" 
-            className="gap-2 rounded-xl px-5 h-10 text-xs font-black bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white shadow-lg shadow-red-500/25 transition-all hover:scale-[1.02]"
+            className="gap-2 rounded-xl px-5 h-10 text-xs font-black bg-gradient-to-l from-[#d6ac40] to-[#b8860b] hover:from-[#e0b850] hover:to-[#c89610] text-[#0a0a14] shadow-lg shadow-[#d6ac40]/30 cursor-pointer transition-all duration-200 hover:scale-[1.02]"
           >
             <Package className="h-3.5 w-3.5" />
             إزالة يدوية
@@ -2162,11 +2218,11 @@ export default function RemovalTasks() {
         {selectedItems.size > 0 && (
           <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
             className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50">
-            <div className="bg-red-600 text-white px-6 py-4 shadow-2xl rounded-2xl flex items-center gap-4 flex-wrap justify-center">
-              <Badge variant="secondary" className="bg-white text-red-700 text-lg px-4 py-2">{selectedItems.size} لوحة محددة</Badge>
+            <div className="bg-gradient-to-l from-[#d6ac40] to-[#b8860b] text-[#0a0a14] px-6 py-4 shadow-2xl shadow-[#d6ac40]/40 rounded-2xl flex items-center gap-3 flex-wrap justify-center ring-1 ring-[#d6ac40]/50">
+              <Badge variant="secondary" className="bg-[#0a0a14] text-[#d6ac40] text-lg px-4 py-2 font-black border-0">{selectedItems.size} لوحة محددة</Badge>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="secondary" className="gap-2 bg-white/20 hover:bg-white/30 text-white border-0">
+                  <Button variant="secondary" className="gap-2 bg-[#0a0a14]/15 hover:bg-[#0a0a14]/25 text-[#0a0a14] border-0 font-bold cursor-pointer">
                     <CalendarIcon className="h-4 w-4" />
                     {removalDate ? format(removalDate, 'dd MMM yyyy', { locale: ar }) : 'تاريخ الإزالة'}
                   </Button>
@@ -2175,15 +2231,15 @@ export default function RemovalTasks() {
                   <Calendar mode="single" selected={removalDate} onSelect={setRemovalDate} locale={ar} className="pointer-events-auto" />
                 </PopoverContent>
               </Popover>
-              <Button 
-                onClick={() => completeItemsMutation.mutate()} 
-                disabled={!removalDate || completeItemsMutation.isPending} 
-                className="gap-2 bg-white text-red-700 hover:bg-white/90"
+              <Button
+                onClick={() => completeItemsMutation.mutate()}
+                disabled={!removalDate || completeItemsMutation.isPending}
+                className="gap-2 bg-[#0a0a14] text-[#d6ac40] hover:bg-[#0a0a14]/85 font-black cursor-pointer shadow-md"
               >
                 <CheckCircle2 className="h-4 w-4" />
                 {completeItemsMutation.isPending ? 'جاري...' : 'تأكيد الإزالة'}
               </Button>
-              <Button variant="ghost" size="icon" className="text-white hover:bg-white/20" onClick={() => { setSelectedItems(new Set()); setSelectedTeamId(''); }}>
+              <Button variant="ghost" size="icon" className="text-[#0a0a14] hover:bg-[#0a0a14]/15 cursor-pointer" onClick={() => { setSelectedItems(new Set()); setSelectedTeamId(''); }}>
                 <X className="h-4 w-4" />
               </Button>
             </div>
@@ -2293,7 +2349,7 @@ export default function RemovalTasks() {
                 
                 const handleSendWhatsApp = () => {
                   const teamName = team?.team_name || 'غير محدد';
-                  const teamTasks = filteredTasksByTeam[printAllTeamId] || [];
+                  const teamTasks = tasksByTeamForPrint[printAllTeamId] || [];
                   const teamTaskIds = teamTasks.map((t: any) => t.id);
                   const teamItems = allTaskItems.filter((item: any) => 
                     teamTaskIds.includes(item.task_id) && item.status === 'pending'
@@ -2348,7 +2404,7 @@ export default function RemovalTasks() {
               <Button onClick={() => {
                 if (printAllTeamId) {
                   // Get all pending items for this team
-                  const teamTasks = filteredTasksByTeam[printAllTeamId] || [];
+                  const teamTasks = tasksByTeamForPrint[printAllTeamId] || [];
                   const teamTaskIds = teamTasks.map(t => t.id);
                   const teamItems = allTaskItems.filter(item => 
                     teamTaskIds.includes(item.task_id) && item.status === 'pending'

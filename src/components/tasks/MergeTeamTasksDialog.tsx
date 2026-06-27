@@ -47,6 +47,23 @@ export function MergeTeamTasksDialog({
   const [merging, setMerging] = useState(false);
 
   const handleToggleTask = (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+    
+    const isReinstallation = task.task_type === 'reinstallation';
+    
+    // Check if any currently selected task has a different type
+    const hasDifferentType = selectedTasks.some(selectedId => {
+      const selectedTask = tasks.find(t => t.id === selectedId);
+      const isSelectedReinstallation = selectedTask?.task_type === 'reinstallation';
+      return isSelectedReinstallation !== isReinstallation;
+    });
+
+    if (hasDifferentType && !selectedTasks.includes(taskId)) {
+      toast.error('لا يمكن دمج مهام التركيب الجديد مع مهام إعادة التركيب. يرجى اختيار مهام من نفس النوع.');
+      return;
+    }
+
     setSelectedTasks(prev =>
       prev.includes(taskId)
         ? prev.filter(id => id !== taskId)
@@ -95,10 +112,15 @@ export function MergeTeamTasksDialog({
       const selectedTasksData = tasks.filter(t => selectedTasks.includes(t.id));
       const firstTask = selectedTasksData[0];
       const contractIds = selectedTasksData.map(t => t.contract_id);
+      const uniqueContractIds = [...new Set(contractIds)];
       
       // تحديد نوع المهمة - إذا كانت أي مهمة إعادة تركيب، تكون المهمة المدمجة إعادة تركيب
       const hasReinstallation = selectedTasksData.some(t => t.task_type === 'reinstallation');
       
+      const taskName = hasReinstallation
+        ? `إعادة تركيب مجمعة (عقود: ${uniqueContractIds.join('، ')})`
+        : `تركيب مجمعة (عقود: ${uniqueContractIds.join('، ')})`;
+
       const { data: newTask, error: taskError } = await supabase
         .from('installation_tasks')
         .insert({
@@ -106,7 +128,8 @@ export function MergeTeamTasksDialog({
           team_id: teamId,
           status: 'pending',
           contract_ids: contractIds,
-          task_type: hasReinstallation ? 'reinstallation' : 'installation'
+          task_type: hasReinstallation ? 'reinstallation' : 'installation',
+          task_name: taskName
         })
         .select()
         .single();
@@ -127,6 +150,12 @@ export function MergeTeamTasksDialog({
         .insert(updates);
 
       if (insertError) throw insertError;
+
+      // تحديث اسم المهمة المجمعة التلقائية في جدول composite_tasks لتطابق الاسم الجديد
+      await supabase
+        .from('composite_tasks')
+        .update({ task_name: taskName })
+        .eq('installation_task_id', newTask.id);
 
       toast.success(`تم دمج ${selectedTasks.length} مهمة بنجاح (${items.length} لوحة)`);
       onSuccess();
@@ -163,24 +192,40 @@ export function MergeTeamTasksDialog({
           </div>
 
           <div className="space-y-2 max-h-[400px] overflow-y-auto">
-            {tasks.map(task => (
-              <Card
-                key={task.id}
-                className={`cursor-pointer transition-colors ${
-                  selectedTasks.includes(task.id)
-                    ? 'border-primary bg-primary/5'
-                    : 'hover:bg-muted/50'
-                }`}
-                onClick={() => handleToggleTask(task.id)}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3 flex-1">
-                      <Checkbox
-                        checked={selectedTasks.includes(task.id)}
-                        onCheckedChange={() => handleToggleTask(task.id)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
+            {tasks.map(task => {
+              const isSelected = selectedTasks.includes(task.id);
+              const isReinstallation = task.task_type === 'reinstallation';
+              
+              // Determine if this task is disabled based on current selection
+              let isDisabled = false;
+              if (selectedTasks.length > 0) {
+                const firstSelectedId = selectedTasks[0];
+                const firstSelectedTask = tasks.find(t => t.id === firstSelectedId);
+                const isFirstReinstallation = firstSelectedTask?.task_type === 'reinstallation';
+                isDisabled = isFirstReinstallation !== isReinstallation;
+              }
+
+              return (
+                <Card
+                  key={task.id}
+                  className={`transition-colors ${
+                    isSelected
+                      ? 'border-primary bg-primary/5 cursor-pointer'
+                      : isDisabled
+                      ? 'opacity-50 cursor-not-allowed bg-muted/20'
+                      : 'hover:bg-muted/50 cursor-pointer'
+                  }`}
+                  onClick={() => !isDisabled && handleToggleTask(task.id)}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3 flex-1">
+                        <Checkbox
+                          checked={isSelected}
+                          disabled={isDisabled}
+                          onCheckedChange={() => !isDisabled && handleToggleTask(task.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
                       <div className="flex-1 space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Badge variant="outline">#{task.contract_id}</Badge>
@@ -200,8 +245,9 @@ export function MergeTeamTasksDialog({
                   </div>
                 </CardContent>
               </Card>
-            ))}
-          </div>
+            );
+          })}
+        </div>
 
           {selectedTasks.length > 0 && (
             <div className="bg-muted p-3 rounded-lg">

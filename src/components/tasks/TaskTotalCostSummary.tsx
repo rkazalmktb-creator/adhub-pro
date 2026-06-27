@@ -107,6 +107,7 @@ interface TaskTotalCostSummaryProps {
   billboards?: Record<number, Billboard>;
   onRefresh: () => void;
   taskType?: 'installation' | 'reinstallation';
+  disabled?: boolean;
 }
 
 const BILLBOARD_TYPE_ICONS: Record<string, any> = {
@@ -138,7 +139,8 @@ export function TaskTotalCostSummary({
   installationPrices,
   billboards = {},
   onRefresh,
-  taskType
+  taskType,
+  disabled = false
 }: TaskTotalCostSummaryProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [sizesMap, setSizesMap] = useState<Record<string, SizeData>>({});
@@ -700,23 +702,25 @@ export function TaskTotalCostSummary({
               
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => setPricingType('piece')}
+                  onClick={() => !disabled && setPricingType('piece')}
+                  disabled={disabled}
                   className={`p-3 rounded-lg border-2 transition-all flex items-center justify-center gap-2 ${
                     pricingType === 'piece' 
                       ? 'border-primary bg-primary text-primary-foreground' 
                       : 'border-border bg-card hover:border-primary/50 text-foreground'
-                  }`}
+                  } ${disabled ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}
                 >
                   <Square className="h-4 w-4" />
                   <span className="font-medium text-sm">بالقطعة</span>
                 </button>
                 <button
-                  onClick={() => setPricingType('meter')}
+                  onClick={() => !disabled && setPricingType('meter')}
+                  disabled={disabled}
                   className={`p-3 rounded-lg border-2 transition-all flex items-center justify-center gap-2 ${
                     pricingType === 'meter' 
                       ? 'border-primary bg-primary text-primary-foreground' 
                       : 'border-border bg-card hover:border-primary/50 text-foreground'
-                  }`}
+                  } ${disabled ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}
                 >
                   <Ruler className="h-4 w-4" />
                   <span className="font-medium text-sm">بالمتر المربع</span>
@@ -763,7 +767,7 @@ export function TaskTotalCostSummary({
                   size="sm"
                   variant="outline"
                   onClick={handleSetAllFree}
-                  disabled={distributing || totals.customerCost === 0}
+                  disabled={disabled || distributing || totals.customerCost === 0}
                   className="gap-2 text-purple-600 border-purple-300 hover:bg-purple-50"
                 >
                   <Gift className="h-4 w-4" />
@@ -836,6 +840,7 @@ export function TaskTotalCostSummary({
                                     cutout: prev[type]?.cutout || 0
                                   }
                                 }))}
+                                disabled={disabled}
                               />
                             </div>
                           )}
@@ -860,13 +865,14 @@ export function TaskTotalCostSummary({
                                     cutout: Number(e.target.value) || 0
                                   }
                                 }))}
+                                disabled={disabled}
                               />
                             </div>
                           )}
                           <Button
                             size="sm"
                             onClick={() => handleApplyMeterToType(type)}
-                            disabled={distributing || (!typeMeterPrices[type]?.normal && !typeMeterPrices[type]?.cutout)}
+                            disabled={disabled || distributing || (!typeMeterPrices[type]?.normal && !typeMeterPrices[type]?.cutout)}
                             className="gap-1"
                           >
                             <Check className="h-3 w-3" />
@@ -950,6 +956,7 @@ export function TaskTotalCostSummary({
                                                 cutout: prev[sizeData.size]?.cutout || 0
                                               }
                                             }))}
+                                            disabled={disabled}
                                           />
                                           <span className="text-xs text-muted-foreground">د.ل</span>
                                           <span className="text-xs text-muted-foreground">× {sizeData.normalCount}</span>
@@ -980,6 +987,7 @@ export function TaskTotalCostSummary({
                                                 cutout: Number(e.target.value) || 0
                                               }
                                             }))}
+                                            disabled={disabled}
                                           />
                                           <span className="text-xs text-muted-foreground">د.ل</span>
                                           <span className="text-xs text-muted-foreground">× {sizeData.cutoutCount}</span>
@@ -1015,6 +1023,7 @@ export function TaskTotalCostSummary({
                                                 cutout: prev[sizeData.size]?.cutout || 0
                                               }
                                             }))}
+                                            disabled={disabled}
                                           />
                                           <span className="text-xs text-primary font-medium">
                                             = {meterPrices[sizeData.size]?.normal 
@@ -1044,6 +1053,7 @@ export function TaskTotalCostSummary({
                                                 cutout: Number(e.target.value) || 0
                                               }
                                             }))}
+                                            disabled={disabled}
                                           />
                                           <span className="text-xs text-amber-600 font-medium">
                                             = {meterPrices[sizeData.size]?.cutout 
@@ -1059,7 +1069,7 @@ export function TaskTotalCostSummary({
                                           e.stopPropagation();
                                           handleApplyMeterToSize(sizeData.size);
                                         }}
-                                        disabled={distributing || (!meterPrices[sizeData.size]?.normal && !meterPrices[sizeData.size]?.cutout)}
+                                        disabled={disabled || distributing || (!meterPrices[sizeData.size]?.normal && !meterPrices[sizeData.size]?.cutout)}
                                         className="gap-1 h-8"
                                       >
                                         <Check className="h-3 w-3" />
@@ -1333,29 +1343,31 @@ export function TaskTotalCostSummary({
                                               </div>
 
                                               {/* أزرار التحكم */}
-                                              <div className="flex items-center gap-1">
-                                                <Button
-                                                  size="icon"
-                                                  variant="ghost"
-                                                  className="h-7 w-7"
-                                                  onClick={() => startEditingItem(item)}
-                                                  title="تعديل"
-                                                >
-                                                  <Pencil className="h-3 w-3" />
-                                                </Button>
-                                                {item.customer_installation_cost > 0 && (
+                                              {!disabled && (
+                                                <div className="flex items-center gap-1">
                                                   <Button
                                                     size="icon"
                                                     variant="ghost"
                                                     className="h-7 w-7"
-                                                    onClick={() => handleSetFree(item.id)}
-                                                    disabled={distributing}
-                                                    title="تحويل لمجاني"
+                                                    onClick={() => startEditingItem(item)}
+                                                    title="تعديل"
                                                   >
-                                                    <Gift className="h-3 w-3 text-purple-600" />
+                                                    <Pencil className="h-3 w-3" />
                                                   </Button>
-                                                )}
-                                              </div>
+                                                  {item.customer_installation_cost > 0 && (
+                                                    <Button
+                                                      size="icon"
+                                                      variant="ghost"
+                                                      className="h-7 w-7"
+                                                      onClick={() => handleSetFree(item.id)}
+                                                      disabled={distributing}
+                                                      title="تحويل لمجاني"
+                                                    >
+                                                      <Gift className="h-3 w-3 text-purple-600" />
+                                                    </Button>
+                                                  )}
+                                                </div>
+                                              )}
                                             </div>
                                           </div>
                                         )}
@@ -1377,7 +1389,7 @@ export function TaskTotalCostSummary({
               {pricingType === 'piece' && Object.values(quickPrices).some(p => p.normal > 0 || p.cutout > 0) && (
                 <Button
                   onClick={handleApplyQuickPricing}
-                  disabled={distributing}
+                  disabled={disabled || distributing}
                   className="w-full gap-2"
                 >
                   <Check className="h-4 w-4" />

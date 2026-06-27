@@ -19,6 +19,7 @@ interface AllInstallationsSummaryProps {
   billboards: Record<number, any>;
   installationPrices: Record<number, number>;
   onRefresh: () => void;
+  disabled?: boolean;
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
@@ -34,6 +35,7 @@ export const AllInstallationsSummary: React.FC<AllInstallationsSummaryProps> = (
   billboards,
   installationPrices,
   onRefresh,
+  disabled = false,
 }) => {
   const [taskItemsMap, setTaskItemsMap] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(false);
@@ -378,6 +380,7 @@ export const AllInstallationsSummary: React.FC<AllInstallationsSummaryProps> = (
                       billboards={billboards}
                       onRefresh={handleRefresh}
                       taskType={t.task_type}
+                      disabled={disabled || t.id !== currentTaskId}
                     />
                   </div>
                 </AccordionContent>

@@ -452,7 +452,7 @@ export const RemovalTasksBoard: React.FC<Props> = ({
 
             <div className="flex items-center gap-2 mr-auto lg:mr-0">
               {selected.size > 0 && (
-                <span className="text-xs text-red-400 font-semibold bg-red-500/10 px-3 py-1.5 rounded-full border border-red-500/20">
+                <span className="text-xs text-[#b8860b] font-semibold bg-[#d6ac40]/10 px-3 py-1.5 rounded-full border border-[#d6ac40]/25">
                   {selected.size} محدد
                 </span>
               )}
@@ -460,7 +460,7 @@ export const RemovalTasksBoard: React.FC<Props> = ({
                 <Checkbox
                   checked={allOnPageSel}
                   onCheckedChange={toggleAll}
-                  className="border-muted-foreground/30 data-[state=checked]:bg-red-500 data-[state=checked]:border-red-500 rounded-md h-5 w-5"
+                  className="border-muted-foreground/30 data-[state=checked]:bg-[#d6ac40] data-[state=checked]:border-[#d6ac40] data-[state=checked]:text-[#0a0a14] rounded-md h-5 w-5 cursor-pointer"
                 />
                 <span className="text-xs font-bold text-muted-foreground select-none">تحديد الكل</span>
               </div>
@@ -478,11 +478,11 @@ export const RemovalTasksBoard: React.FC<Props> = ({
               initial={{ opacity: 0, y: -10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -10, scale: 0.98 }}
-              className="bg-red-500/8 border border-red-500/20 rounded-2xl px-5 py-3 flex flex-wrap gap-2.5 items-center shrink-0"
+              className="bg-[#d6ac40]/10 border border-[#d6ac40]/30 rounded-2xl px-5 py-3 flex flex-wrap gap-2.5 items-center shrink-0 shadow-md shadow-[#d6ac40]/5"
             >
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
-                <span className="text-red-400 font-bold text-sm">{selected.size} مهمة محددة</span>
+                <div className="w-2 h-2 rounded-full bg-[#d6ac40] animate-pulse" />
+                <span className="text-[#b8860b] font-bold text-sm">{selected.size} مهمة محددة</span>
               </div>
               <div className="w-px h-5 bg-red-500/25 mx-1" />
               {onBulkComplete && (
@@ -563,6 +563,7 @@ export const RemovalTasksBoard: React.FC<Props> = ({
                       onSendWhatsApp={onSendWhatsApp ? () => onSendWhatsApp(task, task.items) : undefined}
                       hasInstalledPhoto={!!installedImg}
                       onViewInstalledPhoto={installedImg ? () => setPreviewImage(installedImg) : undefined}
+                      onSyncMissing={onSyncMissingBillboards && task.contract_id ? () => onSyncMissingBillboards(task.contract_id, [task.id]) : undefined}
                     >
                       {/* لوحات المهمة */}
                       <div className="px-4 py-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

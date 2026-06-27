@@ -58,6 +58,7 @@ export function PrintAllContractBillboardsDialog({
   const [customBackgroundUrl, setCustomBackgroundUrl] = useState('/ipg.svg');
   const [customizationDialogOpen, setCustomizationDialogOpen] = useState(false);
   const [tableSettingsDialogOpen, setTableSettingsDialogOpen] = useState(false);
+  const [printCityInsteadOfMunicipality, setPrintCityInsteadOfMunicipality] = useState(false);
   
   // جلب إعدادات التخصيص من قاعدة البيانات
   const { settings: customSettings, loading: settingsLoading } = usePrintCustomization();
@@ -183,38 +184,94 @@ export function PrintAllContractBillboardsDialog({
     let designFaceB = undefined;
     let designName = '';
 
-    // تجميع تصاميم المهمة الحالية التي ينتمي إليها العنصر أولاً لضمان عدم ظهور تصاميم مهام قديمة
-    const currentTaskDesigns = designsByTask[item.task_id] || [];
+    // محاولة جلب العنصر الشقيق للوحة إذا كان العنصر الحالي لا يحتوي على تصميم
+    let targetItem = item;
+    if (!item.selected_design_id && (!item.design_face_a || item.design_face_a === billboards[item.billboard_id]?.design_face_a)) {
+      const itemTask = tasks.find(t => t.id === item.task_id);
+      if (itemTask) {
+        const currentType = itemTask.task_type || 'installation';
+        const currentReinstallNum = itemTask.reinstallation_number ?? null;
+        
+        const siblingItem = allTaskItems.find(i => {
+          if (i.billboard_id !== item.billboard_id || i.task_id === item.task_id) return false;
+          const t = tasks.find(x => x.id === i.task_id);
+          if (!t) return false;
+          if (t.contract_id !== itemTask.contract_id) return false;
+          if ((t.task_type || 'installation') !== currentType) return false;
+          if (currentType === 'reinstallation') {
+            return (t.reinstallation_number ?? null) === currentReinstallNum;
+          }
+          return true;
+        });
+        
+        if (siblingItem && siblingItem.selected_design_id) {
+          targetItem = siblingItem;
+        }
+      }
+    }
 
-    // 1. محاولة المطابقة بـ selected_design_id داخل مهمة العنصر
-    let matched = currentTaskDesigns.find((d: any) => d.id === item.selected_design_id);
+    // 1. تحديد المهمة الحالية والعثور على المهام الشقيقة لها (نفس العقد، نفس النوع، نفس رقم إعادة التركيب)
+    const itemTask = tasks.find(t => t.id === targetItem.task_id);
+    const siblingTasks = itemTask ? tasks.filter(t => {
+      if (t.contract_id !== itemTask.contract_id) return false;
+      const tType = t.task_type || 'installation';
+      const itemType = itemTask.task_type || 'installation';
+      if (tType !== itemType) return false;
+      if (itemType === 'reinstallation') {
+        return (t.reinstallation_number ?? null) === (itemTask.reinstallation_number ?? null);
+      }
+      return true;
+    }) : [];
 
-    // 2. fallback: مطابقة بعنوان URL للصورة داخل مهمة العنصر
-    if (!matched && (item.design_face_a || item.design_face_b)) {
-      matched = currentTaskDesigns.find((d: any) =>
-        (item.design_face_a && d.design_face_a_url === item.design_face_a) ||
-        (item.design_face_b && d.design_face_b_url === item.design_face_b)
+    // تصاميم المهمة الحالية والمهام الشقيقة لها (نفس مرحلة التركيب)
+    const localDesigns = siblingTasks.flatMap(t => designsByTask[t.id] || []);
+    // إزالة التكرار حسب رابط الصورة
+    const uniqueLocalDesigns = localDesigns.filter((d: any, i: number, arr: any[]) => 
+      arr.findIndex((x: any) => x.design_face_a_url === d.design_face_a_url) === i
+    );
+
+    // جميع تصاميم العقد بشكل عام (للفولباك)
+    const allContractDesigns = contractTasks.flatMap(t => designsByTask[t.id] || []);
+    const uniqueContractDesigns = allContractDesigns.filter((d: any, i: number, arr: any[]) => 
+      arr.findIndex((x: any) => x.design_face_a_url === d.design_face_a_url) === i
+    );
+
+    let matched = null;
+
+    // أ) محاولة المطابقة بـ selected_design_id في التصاميم المحلية أولاً
+    if (targetItem.selected_design_id) {
+      matched = uniqueLocalDesigns.find((d: any) => d.id === targetItem.selected_design_id);
+      
+      // ب) إذا لم يعثر عليه، ابحث في جميع تصاميم العقد
+      if (!matched) {
+        matched = uniqueContractDesigns.find((d: any) => d.id === targetItem.selected_design_id);
+      }
+    }
+
+    // ج) محاولة المطابقة بعنوان URL للصورة في التصاميم المحلية
+    if (!matched && (targetItem.design_face_a || targetItem.design_face_b)) {
+      matched = uniqueLocalDesigns.find((d: any) =>
+        (targetItem.design_face_a && d.design_face_a_url === targetItem.design_face_a) ||
+        (targetItem.design_face_b && d.design_face_b_url === targetItem.design_face_b)
       );
-    }
-
-    // 3. fallback: أول تصميم لنفس مهمة العنصر
-    if (!matched && currentTaskDesigns.length > 0) {
-      matched = currentTaskDesigns[0];
-    }
-
-    // 4. fallback: البحث عبر جميع مهام العقد إذا لم نعثر على تصميم في المهمة الحالية
-    if (!matched) {
-      const allContractDesigns = contractTasks.flatMap(t => designsByTask[t.id] || []);
-      matched = allContractDesigns.find((d: any) => d.id === item.selected_design_id);
-      if (!matched && (item.design_face_a || item.design_face_b)) {
-        matched = allContractDesigns.find((d: any) =>
-          (item.design_face_a && d.design_face_a_url === item.design_face_a) ||
-          (item.design_face_b && d.design_face_b_url === item.design_face_b)
+      
+      // د) إذا لم يعثر عليه، ابحث في جميع تصاميم العقد بعنوان URL
+      if (!matched) {
+        matched = uniqueContractDesigns.find((d: any) =>
+          (targetItem.design_face_a && d.design_face_a_url === targetItem.design_face_a) ||
+          (targetItem.design_face_b && d.design_face_b_url === targetItem.design_face_b)
         );
       }
-      if (!matched && allContractDesigns.length > 0) {
-        matched = allContractDesigns[0];
-      }
+    }
+
+    // هـ) الفولباك الذكي:
+    // 1. إذا كان هناك تصميم محلي واحد فقط، استخدمه كـ fallback
+    if (!matched && uniqueLocalDesigns.length === 1) {
+      matched = uniqueLocalDesigns[0];
+    }
+    // 2. إذا لم يكن هناك أي تصميم محلي ولكن يوجد تصميم عقد واحد فقط، استخدمه كـ fallback
+    if (!matched && uniqueLocalDesigns.length === 0 && uniqueContractDesigns.length === 1) {
+      matched = uniqueContractDesigns[0];
     }
 
     if (matched) {
@@ -222,8 +279,8 @@ export function PrintAllContractBillboardsDialog({
       designFaceA = matched.design_face_a_url;
       designFaceB = matched.design_face_b_url;
     } else {
-      designFaceA = item.design_face_a;
-      designFaceB = item.design_face_b;
+      designFaceA = targetItem.design_face_a;
+      designFaceB = targetItem.design_face_b;
     }
 
     return { designFaceA, designFaceB, designName };
@@ -495,7 +552,7 @@ export function PrintAllContractBillboardsDialog({
       
 
       const name = billboard.Billboard_Name || `لوحة ${item.billboard_id}`;
-      const municipality = billboard.Municipality || '';
+      const municipality = printCityInsteadOfMunicipality ? (billboard.City || '') : (billboard.Municipality || '');
       const district = billboard.District || '';
       const landmark = billboard.Nearest_Landmark || '';
       const size = billboard.Size || '';
@@ -622,13 +679,13 @@ export function PrintAllContractBillboardsDialog({
             <div class="absolute-field designs-section" style="top: ${s.designs_top}; left: ${s.designs_left}; width: ${s.designs_width}; display: flex; flex-wrap: nowrap; gap: ${s.designs_gap}; ${effectiveDesignA && !effectiveDesignB ? 'justify-content: center;' : ''}">
               ${effectiveDesignA ? `
                 <div class="design-item" ${!effectiveDesignB ? 'style="max-width: 60%;"' : ''}>
-                  <div class="design-label">${(showDesignName && designName) ? (effectiveDesignB ? `${designName} - الوجه الأمامي` : designName) : (effectiveDesignB ? 'التصميم - الوجه الأمامي' : 'التصميم')}</div>
+                  <div class="design-label">${(showDesignName && designName) ? (effectiveDesignB ? `تصميم الوجه الأمامي - ${designName}` : designName) : (effectiveDesignB ? 'تصميم الوجه الأمامي' : 'التصميم')}</div>
                   <img src="${effectiveDesignA}" alt="${designName || 'التصميم'}" class="design-image" style="max-height: ${s.design_image_height}; max-width: 100%; width: auto; height: auto; object-fit: contain;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
                 </div>
               ` : ''}
               ${effectiveDesignB ? `
                 <div class="design-item" ${!effectiveDesignA ? 'style="max-width: 60%;"' : ''}>
-                  <div class="design-label">${(showDesignName && designName) ? (effectiveDesignA ? `${designName} - الوجه الخلفي` : designName) : (effectiveDesignA ? 'التصميم - الوجه الخلفي' : 'التصميم')}</div>
+                  <div class="design-label">${(showDesignName && designName) ? (effectiveDesignA ? `تصميم الوجه الخلفي - ${designName}` : designName) : (effectiveDesignA ? 'تصميم الوجه الخلفي' : 'التصميم')}</div>
                   <img src="${effectiveDesignB}" alt="${designName || 'التصميم'}" class="design-image" style="max-height: ${s.design_image_height}; max-width: 100%; width: auto; height: auto; object-fit: contain;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
                 </div>
               ` : ''}
@@ -968,7 +1025,7 @@ export function PrintAllContractBillboardsDialog({
             if (billboard.Faces_Count) columnHasData[col.id] = true;
             break;
           case 'location':
-            if (billboard.Municipality || billboard.District) columnHasData[col.id] = true;
+            if ((printCityInsteadOfMunicipality ? billboard.City : billboard.Municipality) || billboard.District) columnHasData[col.id] = true;
             break;
           case 'landmark':
             if (billboard.Nearest_Landmark) columnHasData[col.id] = true;
@@ -1010,7 +1067,7 @@ export function PrintAllContractBillboardsDialog({
         
         const globalIndex = pageIndex * rowsPerPage + index + 1;
         const name = billboard.Billboard_Name || `لوحة ${item.billboard_id}`;
-        const municipality = billboard.Municipality || '';
+        const municipality = printCityInsteadOfMunicipality ? (billboard.City || '') : (billboard.Municipality || '');
         const district = billboard.District || '';
         const landmark = billboard.Nearest_Landmark || '';
         const size = billboard.Size || '';
@@ -1782,6 +1839,17 @@ export function PrintAllContractBillboardsDialog({
                 <Label htmlFor="showInstalledImages" className="cursor-pointer flex-1">إظهار صور التركيب الفعلية</Label>
               </div>
             )}
+
+            <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+              <Checkbox
+                id="printCityInsteadOfMunicipality"
+                checked={printCityInsteadOfMunicipality}
+                onCheckedChange={(c) => setPrintCityInsteadOfMunicipality(!!c)}
+              />
+              <Label htmlFor="printCityInsteadOfMunicipality" className="cursor-pointer flex-1">
+                طباعة اسم المدينة بدل البلدية
+              </Label>
+            </div>
 
             <div className="flex gap-2">
               <Button

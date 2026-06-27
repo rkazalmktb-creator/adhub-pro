@@ -701,13 +701,20 @@ export const InstallationTaskDetail: React.FC<Props> = ({
         <div className="flex-1 min-w-0 flex flex-col gap-4 p-4 lg:p-6">
 
           {/* Cost Summary Component */}
-          <AllInstallationsSummary
-            siblingTasks={siblingTasks}
-            currentTaskId={task.id}
-            billboards={billboardById}
-            installationPrices={installationPricingByBillboard}
-            onRefresh={onRefreshItems}
-          />
+          {(() => {
+            const isLatestTask = siblingTasks.length === 0 || 
+              task.id === siblingTasks[siblingTasks.length - 1]?.id;
+            return (
+              <AllInstallationsSummary
+                siblingTasks={siblingTasks.filter(t => t.id === task.id)}
+                currentTaskId={task.id}
+                billboards={billboardById}
+                installationPrices={installationPricingByBillboard}
+                onRefresh={onRefreshItems}
+                disabled={!isLatestTask}
+              />
+            );
+          })()}
 
           {/* Search Bar */}
           <div className="relative">

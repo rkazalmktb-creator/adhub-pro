@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
-import { format, differenceInDays, isAfter, isBefore, subDays } from 'date-fns';
+import { format, differenceInDays, isAfter, isBefore, subDays, subMonths } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { 
   AlertTriangle, 
@@ -67,19 +67,20 @@ export function ExpiredContractsAlert({
     queryFn: async () => {
       const today = new Date();
       const todayStr = today.toISOString().split('T')[0];
-      const threeMonthsAgo = subDays(today, 90);
+      const fourMonthsAgo = subMonths(today, 4);
+      const fourMonthsAgoStr = fourMonthsAgo.toISOString().split('T')[0];
       
-      // جلب العقود المنتهية
-      const { data, error } = await (supabase as any)
+      // 1. جلب العقود المنتهية من جدول العقود (خلال آخر 4 أشهر فقط كما طلب المستخدم)
+      const { data: contractsData, error } = await (supabase as any)
         .from('Contract')
         .select('Contract_Number, "Customer Name", "Ad Type", "End Date", billboard_ids, ignore_removal_alert')
         .lte('"End Date"', today.toISOString())
-        .gte('"End Date"', threeMonthsAgo.toISOString())
+        .gte('"End Date"', fourMonthsAgo.toISOString())
         .order('"End Date"', { ascending: false });
       
       if (error) throw error;
-      
-      // جلب العقود النشطة (غير منتهية) للتحقق من اللوحات المؤجرة حالياً
+
+      // 2. جلب جميع العقود النشطة (غير منتهية) للتحقق من اللوحات المؤجرة حالياً
       const { data: activeContracts } = await supabase
         .from('Contract')
         .select('Contract_Number, billboard_ids')
@@ -93,39 +94,93 @@ export function ExpiredContractsAlert({
           ids.forEach((id: number) => rentedBillboardIds.add(id));
         }
       });
-      
-      console.log('Active contracts count:', activeContracts?.length);
-      console.log('Rented billboard IDs:', Array.from(rentedBillboardIds));
-      
-      // حساب أيام الانتهاء وفلترة العقود
-      const result = (data || [])
-        .filter(c => !c.ignore_removal_alert)
-        .map(contract => {
-          // فلترة اللوحات - استبعاد المؤجرة في عقود نشطة
-          const contractBillboardIds = contract.billboard_ids?.split(',').map((id: string) => parseInt(id.trim())).filter(Boolean) || [];
-          const availableBillboards = contractBillboardIds.filter((billboardId: number) => {
-            // استثناء اللوحات المؤجرة حالياً في عقود نشطة
-            return !rentedBillboardIds.has(billboardId);
-          });
-          
-          if (contract.Contract_Number === 1103) {
-            console.log('Contract 1103 billboards:', contractBillboardIds);
-            console.log('Contract 1103 available:', availableBillboards);
-            console.log('Is 709 rented?', rentedBillboardIds.has(709));
+
+      // 3. جلب جميع اللوحات المنتهية من جدول اللوحات مباشرة (خلال آخر 4 أشهر فقط) للتأكد من جلب اللوحات المضافة يدوياً
+      const { data: expiredBillboardsData } = await supabase
+        .from('billboards')
+        .select('ID, Billboard_Name, Contract_Number, Rent_End_Date, Customer_Name, Ad_Type')
+        .not('Contract_Number', 'is', null)
+        .lte('Rent_End_Date', todayStr)
+        .gte('Rent_End_Date', fourMonthsAgoStr);
+
+      const expiredBillboardsByContract = new Map<number, any[]>();
+      (expiredBillboardsData || []).forEach(b => {
+        const cNum = Number(b.Contract_Number);
+        if (!isNaN(cNum)) {
+          if (!expiredBillboardsByContract.has(cNum)) {
+            expiredBillboardsByContract.set(cNum, []);
           }
-          
-          return {
-            ...contract,
+          expiredBillboardsByContract.get(cNum)!.push(b);
+        }
+      });
+
+      // جلب جميع اللوحات المشمولة بالفعل في مهام إزالة معلقة أو مكتملة لمنع التكرار
+      const { data: removalItems } = await supabase
+        .from('removal_task_items')
+        .select('billboard_id');
+      const existingTaskBillboardIds = new Set(removalItems?.map(item => item.billboard_id).filter(Boolean) || []);
+
+      // دمج وتجهيز القائمة النهائية
+      const processedContracts = new Map<number, any>();
+
+      // أ) معالجة العقود القادمة من جدول العقود
+      (contractsData || []).forEach(contract => {
+        if (contract.ignore_removal_alert) return;
+        if (existingTaskContractIds.has(contract.Contract_Number)) return;
+
+        const contractBillboardIds = contract.billboard_ids?.split(',').map((id: string) => parseInt(id.trim())).filter(Boolean) || [];
+        
+        // جلب اللوحات الإضافية من جدول اللوحات التي ترتبط بنفس العقد
+        const extraBillboards = expiredBillboardsByContract.get(contract.Contract_Number) || [];
+        const extraIds = extraBillboards.map(b => b.ID);
+        
+        const mergedBillboardIds = Array.from(new Set([...contractBillboardIds, ...extraIds]));
+        const availableBillboards = mergedBillboardIds.filter((id: number) => {
+          return !rentedBillboardIds.has(id) && !existingTaskBillboardIds.has(id);
+        });
+
+        if (availableBillboards.length > 0) {
+          processedContracts.set(contract.Contract_Number, {
+            Contract_Number: contract.Contract_Number,
+            'Customer Name': contract['Customer Name'] || 'غير محدد',
+            'Ad Type': contract['Ad Type'] || '—',
+            'End Date': contract['End Date'],
             billboard_ids: availableBillboards.join(','),
-            originalBillboardCount: contractBillboardIds.length,
+            originalBillboardCount: mergedBillboardIds.length,
             availableBillboardCount: availableBillboards.length,
-            daysExpired: differenceInDays(today, new Date(contract['End Date']))
-          };
-        })
-        .filter(c => !existingTaskContractIds.has(c.Contract_Number))
-        .filter(c => c.availableBillboardCount > 0); // فقط العقود التي لديها لوحات متاحة للإزالة
+            daysExpired: differenceInDays(today, new Date(contract['End Date'] || today))
+          });
+        }
+      });
+
+      // ب) معالجة العقود التي لديها لوحات منتهية في جدول اللوحات ولكن لا يوجد لها عقد مسجل أو العقد مسجل بدون لوحات
+      expiredBillboardsByContract.forEach((billboards, contractNumber) => {
+        if (existingTaskContractIds.has(contractNumber)) return;
+        if (processedContracts.has(contractNumber)) return;
+
+        // فلترة اللوحات المتاحة للإزالة
+        const availableBillboards = billboards.filter(b => {
+          return !rentedBillboardIds.has(b.ID) && !existingTaskBillboardIds.has(b.ID);
+        });
+
+        if (availableBillboards.length > 0) {
+          const firstBill = availableBillboards[0];
+          processedContracts.set(contractNumber, {
+            Contract_Number: contractNumber,
+            'Customer Name': firstBill.Customer_Name || 'غير محدد',
+            'Ad Type': firstBill.Ad_Type || '—',
+            'End Date': firstBill.Rent_End_Date || todayStr,
+            billboard_ids: availableBillboards.map(b => b.ID).join(','),
+            originalBillboardCount: billboards.length,
+            availableBillboardCount: availableBillboards.length,
+            daysExpired: differenceInDays(today, new Date(firstBill.Rent_End_Date || today))
+          });
+        }
+      });
+
+      const result = Array.from(processedContracts.values()).sort((a, b) => b.Contract_Number - a.Contract_Number);
       
-      console.log('Final expired contracts:', result.map(c => c.Contract_Number));
+      console.log('Final expired contracts in alert:', result.map(c => c.Contract_Number));
       return result;
     },
     refetchInterval: 60000 // تحديث كل دقيقة

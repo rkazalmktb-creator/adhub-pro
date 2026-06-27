@@ -347,14 +347,14 @@ export const BillboardPrintIndividual: React.FC<BillboardPrintIndividualProps> =
                 <div class="absolute-field designs-section" style="top: 178mm; left: 16mm; width: 178mm; display: flex; gap: 10mm;">
                   ${billboardDesignA ? `
                     <div class="design-item">
-                      <div class="design-label">التصميم - الوجه الأمامي</div>
-                      <img src="${billboardDesignA}" alt="التصميم - الوجه الأمامي" class="design-image" onerror="this.onerror=null;this.src='/placeholder.svg'" />
+                      <div class="design-label">تصميم الوجه الأمامي</div>
+                      <img src="${billboardDesignA}" alt="تصميم الوجه الأمامي" class="design-image" onerror="this.onerror=null;this.src='/placeholder.svg'" />
                     </div>
                   ` : ''}
                   ${billboardDesignB ? `
                     <div class="design-item">
-                      <div class="design-label">التصميم - الوجه الخلفي</div>
-                      <img src="${billboardDesignB}" alt="التصميم - الوجه الخلفي" class="design-image" onerror="this.onerror=null;this.src='/placeholder.svg'" />
+                      <div class="design-label">تصميم الوجه الخلفي</div>
+                      <img src="${billboardDesignB}" alt="تصميم الوجه الخلفي" class="design-image" onerror="this.onerror=null;this.src='/placeholder.svg'" />
                     </div>
                   ` : ''}
                 </div>

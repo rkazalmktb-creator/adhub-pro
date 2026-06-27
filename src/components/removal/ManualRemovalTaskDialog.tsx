@@ -88,12 +88,11 @@ export function ManualRemovalTaskDialog({
       today.setHours(0, 0, 0, 0);
       const todayStr = today.toISOString().split('T')[0];
       
-      // جلب جميع اللوحات من العقود المنتهية
+      // جلب جميع اللوحات المرتبطة بعقود (دون قيد انتهاء التاريخ لتسهيل الإضافة اليدوية لأي لوحة)
       const { data: billboards, error } = await supabase
         .from('billboards')
         .select('*')
         .not('Contract_Number', 'is', null)
-        .lte('Rent_End_Date', todayStr) // منتهي اليوم أو قبله
         .order('Rent_End_Date', { ascending: false, nullsFirst: false });
       
       if (error) throw error;
@@ -113,10 +112,13 @@ export function ManualRemovalTaskDialog({
         }
       });
       
-      // فلترة اللوحات الموجودة بالفعل في مهام إزالة واللوحات المؤجرة حالياً
+      // فلترة اللوحات الموجودة بالفعل في مهام إزالة مع وسم اللوحات ذات العقود النشطة
       return (billboards || []).filter(b => 
-        !existingTaskBillboardIds.has(b.ID) && !rentedBillboardIds.has(b.ID)
-      );
+        !existingTaskBillboardIds.has(b.ID)
+      ).map(b => ({
+        ...b,
+        isRentedInActiveContract: rentedBillboardIds.has(b.ID)
+      }));
     }
   });
 
@@ -275,13 +277,18 @@ export function ManualRemovalTaskDialog({
 
       // إنشاء مهمة لكل فريق
       for (const [teamId, billboardIds] of teamBillboardsMap) {
+        // استخراج أرقام العقود الفريدة للوحات المحددة لهذا الفريق
+        const contractNumbers = Array.from(new Set(
+          billboardIds.map(id => allBillboards.find(b => b.ID === id)?.Contract_Number).filter(Boolean)
+        )) as number[];
+
         const { data: task, error: taskError } = await supabase
           .from('removal_tasks')
           .insert({
             team_id: teamId,
             status: 'pending',
-            contract_id: null,
-            contract_ids: []
+            contract_id: contractNumbers.length === 1 ? contractNumbers[0] : null,
+            contract_ids: contractNumbers
           })
           .select()
           .single();
@@ -290,6 +297,45 @@ export function ManualRemovalTaskDialog({
 
         for (const billboardId of billboardIds) {
           const billboard = allBillboards.find(b => b.ID === billboardId);
+          
+          // جلب صور التصميم من آخر مهمة تركيب للوحة
+          const { data: installationItems } = await supabase
+            .from('installation_task_items')
+            .select('design_face_a, design_face_b')
+            .eq('billboard_id', billboardId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          let designFaceA = installationItems?.design_face_a || null;
+          let designFaceB = installationItems?.design_face_b || null;
+
+          // جلب التصاميم من العقد كـ fallback إذا لم تتوفر في مهام التركيب
+          if ((!designFaceA || !designFaceB) && billboard?.Contract_Number) {
+            const { data: contractData } = await supabase
+              .from('Contract')
+              .select('design_data')
+              .eq('Contract_Number', billboard.Contract_Number)
+              .maybeSingle();
+              
+            if (contractData?.design_data) {
+              try {
+                const dd = typeof contractData.design_data === 'string'
+                  ? JSON.parse(contractData.design_data) : contractData.design_data;
+                const arr = typeof dd === 'string' ? JSON.parse(dd) : dd;
+                if (Array.isArray(arr)) {
+                  const match = arr.find((d: any) => String(d.billboardId) === String(billboardId));
+                  if (match) {
+                    if (!designFaceA) designFaceA = match.designFaceA || match.design_face_a_url || null;
+                    if (!designFaceB) designFaceB = match.designFaceB || match.design_face_b_url || null;
+                  }
+                }
+              } catch (e) {
+                console.error("Error parsing contract design_data for manual removal:", e);
+              }
+            }
+          }
+
           await supabase
             .from('removal_task_items')
             .insert({
@@ -297,8 +343,8 @@ export function ManualRemovalTaskDialog({
               billboard_id: billboardId,
               status: 'pending',
               notes: notes || null,
-              design_face_a: billboard?.design_face_a || null,
-              design_face_b: billboard?.design_face_b || null
+              design_face_a: designFaceA,
+              design_face_b: designFaceB
             });
         }
       }
@@ -616,10 +662,15 @@ export function ManualRemovalTaskDialog({
                                             </div>
                                             
                                             {/* ID Badge */}
-                                            <div className="absolute top-3 left-3">
+                                            <div className="absolute top-3 left-3 flex flex-col gap-1.5 items-start">
                                               <span className="text-xs font-bold text-white bg-black/40 backdrop-blur-md px-2 py-1 rounded-full">
                                                 #{billboard.ID}
                                               </span>
+                                              {(billboard as any).isRentedInActiveContract && (
+                                                <span className="text-[9px] font-extrabold text-white bg-amber-600/90 backdrop-blur-sm px-1.5 py-0.5 rounded-md">
+                                                  عقد نشط
+                                                </span>
+                                              )}
                                             </div>
                                             
                                             {/* Bottom Info on Image */}

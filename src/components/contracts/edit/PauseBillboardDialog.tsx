@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
-import { CalendarIcon, AlertCircle, Check, X, PauseCircle } from 'lucide-react';
+import { CalendarIcon, AlertCircle, Check, X, PauseCircle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { calculateBillboardPauseValue } from '@/services/billboardPauseService';
 import { formatAmount } from '@/lib/formatUtils';
@@ -25,7 +25,7 @@ interface PauseBillboardDialogProps {
   installCost?: number;
   includePrint?: boolean;
   includeInstall?: boolean;
-  onConfirm: (data: { pauseDate: string; notes: string; refundAmount: number; deductFromContract: boolean }) => void;
+  onConfirm: (data: { pauseDate: string; notes: string; refundAmount: number; deductFromContract: boolean }) => Promise<void> | void;
 }
 
 export function PauseBillboardDialog({
@@ -51,6 +51,7 @@ export function PauseBillboardDialog({
   });
   const [notes, setNotes] = useState('');
   const [deductFromContract, setDeductFromContract] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   // Reset state when opened — default to billboard rent start date (installation date in current contract)
   useEffect(() => {
@@ -59,6 +60,7 @@ export function PauseBillboardDialog({
       setPauseDate(isNaN(initial.getTime()) ? new Date() : initial);
       setNotes('');
       setDeductFromContract(true);
+      setLoading(false);
     }
   }, [open, rentStartDate]);
 
@@ -213,20 +215,37 @@ export function PauseBillboardDialog({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={loading}>
             <X className="w-4 h-4 ml-1" />
             إلغاء
           </Button>
           <Button
-            onClick={() => onConfirm({
-              pauseDate: format(pauseDate, 'yyyy-MM-dd'),
-              notes,
-              refundAmount: result.unusedRefund,
-              deductFromContract
-            })}
+            disabled={loading}
+            onClick={async () => {
+              setLoading(true);
+              try {
+                await onConfirm({
+                  pauseDate: format(pauseDate, 'yyyy-MM-dd'),
+                  notes,
+                  refundAmount: result.unusedRefund,
+                  deductFromContract
+                });
+              } catch (err) {
+                setLoading(false);
+              }
+            }}
           >
-            <Check className="w-4 h-4 ml-1" />
-            تأكيد الإيقاف
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 ml-1 animate-spin" />
+                جاري الإيقاف...
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4 ml-1" />
+                تأكيد الإيقاف
+              </>
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

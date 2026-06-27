@@ -28,7 +28,7 @@ import {
   LayoutList, Layers, FileText, X,
   ChevronLeft, ChevronRight, Building2, CalendarDays,
   Banknote, FolderOpen, MessageCircle, ExternalLink, Download, Search,
-  ArrowUpDown, ArrowUp, ArrowDown
+  ArrowUpDown, ArrowUp, ArrowDown, Merge
 } from 'lucide-react';
 import { exportInstallationTaskImagesToZip } from '@/utils/exportInstallationTaskImagesToZip';
 import { toast } from 'sonner';
@@ -88,6 +88,7 @@ interface Props {
   onSyncMissingBillboards?: (contractId: number, taskIds: string[]) => void;
   onDuplicateAsReinstallation?: (taskId: string) => void;
   onDuplicateAsReinstallationGroup?: (taskIds: string[]) => void;
+  onMergeTasks?: (taskIds: string[]) => void;
 }
 
 type SortField = 'id' | 'client' | 'contract' | 'billboards' | 'status' | 'date' | 'team' | 'cost';
@@ -359,6 +360,7 @@ const TaskCardRowInner = ({
   onOpenTask, onToggle, onPrintTask, onPrintAll, onSendWhatsApp, onDistributeDesigns, onManageDesigns,
   onAddBillboard, onDeleteTask, setDeleteConfirmId, onEditTask, onCompleteAllBillboards, onPrintInvoice,
   onCreatePrintTask, onGroupColorExtracted, onDuplicateAsReinstallation,
+  isSelectionDisabled,
 }: any) => {
   const [dominantColor, setDominantColor] = useState<string | null>(null);
 
@@ -410,8 +412,9 @@ const TaskCardRowInner = ({
           <div className="absolute top-2.5 right-2.5 z-30">
             <Checkbox
               checked={isSelected}
+              disabled={isSelectionDisabled}
               onCheckedChange={onToggle}
-              className="h-5 w-5 rounded-full border-2 border-white/45 bg-black/40 backdrop-blur-sm data-[state=checked]:!bg-primary data-[state=checked]:!border-primary cursor-pointer transition-all [&_svg]:!text-white [&_svg]:stroke-[3.5px] [&_svg]:h-3.5 [&_svg]:w-3.5"
+              className="h-5 w-5 rounded-full border-2 border-white/45 bg-black/40 backdrop-blur-sm data-[state=checked]:!bg-primary data-[state=checked]:!border-primary cursor-pointer transition-all [&_svg]:!text-white [&_svg]:stroke-[3.5px] [&_svg]:h-3.5 [&_svg]:w-3.5 disabled:opacity-50 disabled:cursor-not-allowed"
             />
           </div>
 
@@ -728,9 +731,10 @@ const TaskCardRowInner = ({
 
           <Checkbox
             checked={isSelected}
+            disabled={isSelectionDisabled}
             onCheckedChange={onToggle}
             onClick={e => e.stopPropagation()}
-            className="border-muted-foreground/30 data-[state=checked]:bg-primary data-[state=checked]:border-primary shrink-0 [&_svg]:!text-white [&_svg]:stroke-[3.5px] [&_svg]:h-3 [&_svg]:w-3"
+            className="border-muted-foreground/30 data-[state=checked]:bg-primary data-[state=checked]:border-primary shrink-0 [&_svg]:!text-white [&_svg]:stroke-[3.5px] [&_svg]:h-3 [&_svg]:w-3 disabled:opacity-50 disabled:cursor-not-allowed"
           />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -903,7 +907,7 @@ export const InstallationTasksTable: React.FC<Props> = ({
   onPrintTask, onPrintAll, onSendWhatsApp, onDistributeDesigns, onManageDesigns,
   onManageDesignsGroup, onDistributeDesignsGroup,
   onAddBillboard, onDeleteTask, onEditTask, onCompleteAllBillboards, onPrintInvoice, onCreatePrintTask, onSyncMissingBillboards,
-  onDuplicateAsReinstallation, onDuplicateAsReinstallationGroup,
+  onDuplicateAsReinstallation, onDuplicateAsReinstallationGroup, onMergeTasks,
 }) => {
   const { filters, setFilter } = usePersistedFilters('installation-tasks', {
     search: '',
@@ -1068,10 +1072,53 @@ export const InstallationTasksTable: React.FC<Props> = ({
   const allOnPageSel = paginated.length > 0 && paginated.every(t => selected.has(t.id));
   const toggleAll = () => {
     const next = new Set(selected);
-    allOnPageSel ? paginated.forEach(t => next.delete(t.id)) : paginated.forEach(t => next.add(t.id));
+    if (allOnPageSel) {
+      paginated.forEach(t => next.delete(t.id));
+    } else {
+      let allowedType: string | null = null;
+      if (selected.size > 0) {
+        const firstId = Array.from(selected)[0];
+        const firstTask = enriched.find(t => t.id === firstId);
+        allowedType = firstTask?.task_type || 'installation';
+      } else if (paginated.length > 0) {
+        allowedType = paginated[0].task_type || 'installation';
+      }
+
+      let hasWarning = false;
+      paginated.forEach(t => {
+        const tType = t.task_type || 'installation';
+        if (allowedType && tType === allowedType) {
+          next.add(t.id);
+        } else {
+          hasWarning = true;
+        }
+      });
+
+      if (hasWarning) {
+        toast.warning('تم تحديد المهام من نفس النوع فقط لتجنب التداخل بين التركيب الجديد وإعادة التركيب.');
+      }
+    }
     setSelected(next);
   };
   const toggleOne = (id: string) => {
+    const task = enriched.find(t => t.id === id);
+    if (!task) return;
+
+    const isReinstallation = task.task_type === 'reinstallation';
+
+    if (!selected.has(id)) {
+      const hasDifferentType = Array.from(selected).some(selectedId => {
+        const selTask = enriched.find(t => t.id === selectedId);
+        const isSelReinstallation = selTask?.task_type === 'reinstallation';
+        return isSelReinstallation !== isReinstallation;
+      });
+
+      if (hasDifferentType) {
+        toast.error('لا يمكن تحديد مهام تركيب جديدة مع مهام إعادة تركيب في نفس الوقت.');
+        return;
+      }
+    }
+
     const next = new Set(selected);
     next.has(id) ? next.delete(id) : next.add(id);
     setSelected(next);
@@ -1393,6 +1440,16 @@ export const InstallationTasksTable: React.FC<Props> = ({
               >
                 <MessageCircle className="h-3.5 w-3.5" /> إرسال للفرق
               </Button>
+              {onMergeTasks && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 px-3 text-xs gap-1.5 text-indigo-400 hover:bg-indigo-500/15 rounded-xl"
+                  onClick={() => onMergeTasks(Array.from(selected))}
+                >
+                  <Merge className="h-3.5 w-3.5" /> دمج المهام
+                </Button>
+              )}
               <Button size="sm" variant="ghost" className="h-8 px-3 text-xs gap-1.5 text-blue-400 hover:bg-blue-500/15 rounded-xl">
                 <ChevronDown className="h-3.5 w-3.5" /> تغيير الحالة
               </Button>
@@ -1467,6 +1524,17 @@ export const InstallationTasksTable: React.FC<Props> = ({
                   if (allGroupSelected) {
                     groupTasks.forEach(t => next.delete(t.id));
                   } else {
+                    let allowedType: string | null = null;
+                    if (selected.size > 0) {
+                      const firstId = Array.from(selected)[0];
+                      const firstSel = enriched.find(t => t.id === firstId);
+                      allowedType = firstSel?.task_type || 'installation';
+                    }
+
+                    if (allowedType && isReinstallation !== (allowedType === 'reinstallation')) {
+                      toast.error('لا يمكن تحديد هذه المجموعة لأنها تحتوي على نوع مهام مختلف عن التحديد الحالي.');
+                      return;
+                    }
                     groupTasks.forEach(t => next.add(t.id));
                   }
                   setSelected(next);
@@ -1503,7 +1571,7 @@ export const InstallationTasksTable: React.FC<Props> = ({
                           <Checkbox
                             checked={allGroupSelected}
                             {...(someGroupSelected && !allGroupSelected ? { 'data-state': 'indeterminate' as const } : {})}
-                            className="h-4.5 w-4.5 rounded-lg border-muted-foreground/35 data-[state=checked]:bg-primary data-[state=checked]:border-primary [&_svg]:!text-white [&_svg]:stroke-[3.5px] [&_svg]:h-3.5 [&_svg]:w-3.5"
+                            className="h-4.5 w-4.5 rounded-full border-muted-foreground/35 data-[state=checked]:bg-primary data-[state=checked]:border-primary [&_svg]:!text-white [&_svg]:stroke-[3.5px] [&_svg]:h-3.5 [&_svg]:w-3.5"
                           />
                         </div>
                         <div className={`p-2 rounded-xl shrink-0`} style={{ backgroundColor: iconBgColor, color: iconTextColor }}>
@@ -1562,7 +1630,7 @@ export const InstallationTasksTable: React.FC<Props> = ({
                             </span>
                           )}
 
-                          {/* Action Buttons (All fully visible as requested by the user) */}
+                          {/* Action Buttons */}
                           <div className="flex flex-wrap items-center gap-1.5" onClick={e => e.stopPropagation()}>
                             <Button
                               size="sm"
@@ -1573,30 +1641,6 @@ export const InstallationTasksTable: React.FC<Props> = ({
                               <FileText className="h-3.5 w-3.5" />
                               طباعة الكل
                             </Button>
-
-                            {onSyncMissingBillboards && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 px-2.5 rounded-xl text-[11px] font-semibold gap-1 bg-muted/30 border-border/30 text-muted-foreground hover:bg-emerald-500/10 hover:text-emerald-500 hover:border-emerald-500/20 transition-all"
-                                onClick={() => onSyncMissingBillboards(cid, groupTasks.map(t => t.id))}
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                                إضافة الناقصة
-                              </Button>
-                            )}
-
-                            {onDuplicateAsReinstallationGroup && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 px-2.5 rounded-xl text-[11px] font-semibold gap-1 bg-muted/30 border-border/30 text-muted-foreground hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/20 transition-all"
-                                onClick={() => onDuplicateAsReinstallationGroup(groupTasks.map(t => t.id))}
-                              >
-                                <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
-                                تكرار كإعادة تركيب
-                              </Button>
-                            )}
 
                             <Button
                               size="sm"
@@ -1617,18 +1661,6 @@ export const InstallationTasksTable: React.FC<Props> = ({
                               <ImageIcon className="h-3.5 w-3.5" />
                               توزيع
                             </Button>
-
-                            {onSyncMissingBillboards && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 px-2.5 rounded-xl text-[11px] font-semibold gap-1 bg-muted/30 border-border/30 text-muted-foreground hover:bg-emerald-500/10 hover:text-emerald-500 hover:border-emerald-500/20 transition-all"
-                                onClick={() => onSyncMissingBillboards(cid, groupTasks.map(t => t.id))}
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                                إضافة الناقصة
-                              </Button>
-                            )}
 
                             <Button
                               size="sm"

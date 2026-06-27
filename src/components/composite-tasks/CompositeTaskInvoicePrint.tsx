@@ -313,7 +313,7 @@ export function CompositeTaskInvoicePrint({ task }: CompositeTaskInvoicePrintPro
       if (task.installation_task_id) {
         const { data: taskDesigns } = await supabase
           .from('task_designs')
-          .select('design_face_a_url, design_face_b_url')
+          .select('id, design_face_a_url, design_face_b_url')
           .eq('task_id', task.installation_task_id);
         
         if (taskDesigns && taskDesigns.length > 0) {
@@ -330,14 +330,39 @@ export function CompositeTaskInvoicePrint({ task }: CompositeTaskInvoicePrintPro
               }
             });
           } else {
-            // تصاميم متعددة - استخدم أول واحد كفولباك
-            const firstDesign = taskDesigns[0];
+            // ✅ تصاميم متعددة - ربط كل لوحة بتصميمها عبر selected_design_id
+            const designById = new Map(taskDesigns.map((td: any) => [td.id, td]));
+            const firstDesign = taskDesigns[0]; // فولباك
             installItemsList.forEach((item: any) => {
               if (item.billboard_id) {
-                taskDesignsMap[item.billboard_id] = {
-                  face_a: firstDesign.design_face_a_url || undefined,
-                  face_b: firstDesign.design_face_b_url || undefined,
-                };
+                // محاولة ربط التصميم عبر selected_design_id
+                const matchedDesign = item.selected_design_id ? designById.get(item.selected_design_id) : null;
+                if (matchedDesign) {
+                  taskDesignsMap[item.billboard_id] = {
+                    face_a: matchedDesign.design_face_a_url || undefined,
+                    face_b: matchedDesign.design_face_b_url || undefined,
+                    isMatched: true // تم المطابقة بنجاح
+                  };
+                } else {
+                  // لا تقم بالكتابة فوق تصميم تم مطابقته بنجاح سابقاً بـ fallback
+                  if ((taskDesignsMap[item.billboard_id] as any)?.isMatched) {
+                    return;
+                  }
+
+                  if (item.design_face_a || item.design_face_b) {
+                    // استخدام التصاميم المحددة للعنصر مباشرة من قاعدة البيانات
+                    taskDesignsMap[item.billboard_id] = {
+                      face_a: item.design_face_a || undefined,
+                      face_b: item.design_face_b || undefined,
+                    };
+                  } else {
+                    // فولباك: استخدم أول تصميم
+                    taskDesignsMap[item.billboard_id] = {
+                      face_a: firstDesign.design_face_a_url || undefined,
+                      face_b: firstDesign.design_face_b_url || undefined,
+                    };
+                  }
+                }
               }
             });
           }

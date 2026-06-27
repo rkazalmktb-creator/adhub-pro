@@ -286,13 +286,13 @@ export function PrintPreview({
         <div class="absolute-field designs-section" data-element-key="designs" style="top: ${s.designs_top}; left: ${s.designs_left}; width: ${s.designs_width}; display: flex; flex-direction: row; gap: ${s.designs_gap}; align-items: flex-start; justify-content: center; ${hl('designs')}">
           ${effectiveDesignA ? `
             <div class="design-item" ${!effectiveDesignB ? 'style="max-width: 60%;"' : ''}>
-              <div class="design-label">${effectiveDesignB ? 'التصميم - الوجه الأمامي' : 'التصميم'}</div>
+              <div class="design-label">${effectiveDesignB ? 'تصميم الوجه الأمامي' : 'التصميم'}</div>
               <img src="${effectiveDesignA}" alt="التصميم" class="design-image" style="max-height: ${s.design_image_height};" />
             </div>
           ` : ''}
           ${effectiveDesignB ? `
             <div class="design-item" ${!effectiveDesignA ? 'style="max-width: 60%;"' : ''}>
-              <div class="design-label">${effectiveDesignA ? 'التصميم - الوجه الخلفي' : 'التصميم'}</div>
+              <div class="design-label">${effectiveDesignA ? 'تصميم الوجه الخلفي' : 'التصميم'}</div>
               <img src="${effectiveDesignB}" alt="التصميم" class="design-image" style="max-height: ${s.design_image_height};" />
             </div>
           ` : ''}

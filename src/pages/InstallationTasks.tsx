@@ -1247,6 +1247,7 @@ export default function InstallationTasks() {
         .from('composite_tasks')
         .select('id')
         .eq('contract_id', contractId)
+        .eq('task_type', 'reinstallation')
         .is('installation_task_id', null)
         .maybeSingle();
 
@@ -2089,10 +2090,30 @@ export default function InstallationTasks() {
     if (!selectedTaskId || !selectedTaskObj) return [];
     const key = `${selectedTaskObj.contract_id}-${selectedTaskObj.task_type || 'installation'}-${(selectedTaskObj as any).reinstallation_number ?? 'new'}`;
     const siblingIds = tasks
-      .filter(t => `${t.contract_id}-${t.task_type || 'installation'}-${(t as any).reinstallation_number ?? 'new'}` === key)
+      .filter(t => {
+        const isSameKey = `${t.contract_id}-${t.task_type || 'installation'}-${(t as any).reinstallation_number ?? 'new'}` === key;
+        if (!isSameKey) return false;
+
+        // التحقق من أن المهمة الشقيقة تم إنشاؤها في نفس الفترة الزمنية (خلال 24 ساعة)
+        // لتجنب جلب تصاميم من مهام تركيب قديمة جداً لنفس العقد
+        if (t.created_at && selectedTaskObj.created_at) {
+          const diffMs = Math.abs(new Date(t.created_at).getTime() - new Date(selectedTaskObj.created_at).getTime());
+          const diffHours = diffMs / (1000 * 60 * 60);
+          if (diffHours > 24) return false;
+        }
+
+        return true;
+      })
       .map(t => t.id);
     const merged = siblingIds.flatMap(id => designsByTask[id] || []);
-    return merged.filter((d: any, i: number, arr: any[]) => arr.findIndex((x: any) => x.id === d.id) === i);
+    // ✅ إزالة التصاميم المكررة حسب رابط التصميم (وليس فقط id) لتجنب التكرار عند توزيع التصاميم على مهمتين شقيقتين
+    const seen = new Set<string>();
+    return merged.filter((d: any) => {
+      const key = d.design_face_a_url || d.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [selectedTaskId, selectedTaskObj, tasks, designsByTask]);
   const selectedTaskContract = useMemo(() => selectedTaskObj ? contractById[selectedTaskObj.contract_id] : null, [selectedTaskObj, contractById]);
   const selectedTeam = useMemo(() => selectedTaskObj ? teamById[selectedTaskObj.team_id] : null, [selectedTaskObj, teamById]);
@@ -2165,7 +2186,7 @@ export default function InstallationTasks() {
                   await supabase.from('installation_task_items').delete().eq('task_id', selectedTaskId);
                   await supabase.from('installation_tasks').delete().eq('id', selectedTaskId);
                   for (const [cId, cItems] of Object.entries(itemsByContract)) {
-                    const { data: newTask } = await supabase.from('installation_tasks').insert({ contract_id: Number(cId), team_id: selectedTaskObj.team_id, status: 'pending' }).select().single();
+                    const { data: newTask } = await supabase.from('installation_tasks').insert({ contract_id: Number(cId), team_id: selectedTaskObj.team_id, status: 'pending', task_type: selectedTaskObj.task_type }).select().single();
                     if (newTask) await supabase.from('installation_task_items').insert(cItems.map(({ id, created_at, ...rest }) => ({ ...rest, task_id: newTask.id })));
                   }
                   toast.success('تم التراجع عن الدمج'); setSelectedTaskId(null); handleRefreshAll();
@@ -2441,6 +2462,49 @@ export default function InstallationTasks() {
                 duplicateAsReinstallationGroupMutation.mutate(taskIds);
               }
             }}
+            onMergeTasks={(selectedTaskIds) => {
+              const selectedTasksList = tasks.filter(t => selectedTaskIds.includes(t.id));
+              if (selectedTasksList.length < 2) {
+                toast.error('يجب اختيار مهمتين على الأقل للدمج');
+                return;
+              }
+
+              // Check if all selected tasks belong to the same team
+              const firstTeamId = selectedTasksList[0].team_id;
+              const sameTeam = selectedTasksList.every(t => t.team_id === firstTeamId);
+              if (!sameTeam) {
+                toast.error('يجب أن تكون جميع المهام المحددة مسندة لنفس الفريق لدمجها.');
+                return;
+              }
+
+              // Check if all selected tasks belong to the same customer
+              const firstContract = contractById[selectedTasksList[0].contract_id];
+              const firstCustomerId = firstContract?.customer_id;
+              const sameCustomer = selectedTasksList.every(t => {
+                const contract = contractById[t.contract_id];
+                return contract?.customer_id === firstCustomerId;
+              });
+
+              if (!sameCustomer) {
+                toast.error('يجب أن تكون جميع المهام المحددة لزبون واحد فقط لدمجها.');
+                return;
+              }
+
+              // Open MergeTeamTasksDialog
+              const team = teamById[firstTeamId];
+              setSelectedTeamForMerge({ id: firstTeamId, name: team?.team_name || 'الفريق' });
+              setSelectedCustomerForMerge(firstCustomerId || null);
+              setTasksToMerge(selectedTasksList.map(t => ({
+                id: t.id,
+                contract_id: t.contract_id,
+                contract_name: contractById[t.contract_id]?.['Customer Name'] || 'غير محدد',
+                customer_name: contractById[t.contract_id]?.['Customer Name'] || 'غير محدد',
+                billboard_count: allTaskItems.filter(item => item.task_id === t.id).length,
+                task_type: t.task_type,
+                ad_type: contractById[t.contract_id]?.['Ad Type']
+              })));
+              setMergeDialogOpen(true);
+            }}
             onAddTask={() => setAddTaskDialogOpen(true)}
             onRefresh={handleRefreshAll}
             onPrintTask={(taskId) => { setPrintTaskId(taskId); setPrintDialogOpen(true); }}
@@ -2618,8 +2682,15 @@ export default function InstallationTasks() {
           })()}
           taskDesigns={(() => {
             const targetIds = selectedGroupTaskIds || [selectedTaskForDesign];
-            return targetIds.flatMap(id => designsByTask[id] || [])
-              .filter((d, i, arr) => arr.findIndex(x => x.id === d.id) === i);
+            const all = targetIds.flatMap(id => designsByTask[id] || []);
+            // ✅ إزالة التصاميم المكررة حسب رابط التصميم
+            const seen = new Set<string>();
+            return all.filter((d) => {
+              const key = d.design_face_a_url || d.id;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
           })()}
           onSuccess={() => {
             refetchTaskItems();
@@ -2647,11 +2718,110 @@ export default function InstallationTasks() {
             open={printDialogOpen}
             onOpenChange={setPrintDialogOpen}
             billboards={taskBillboards.map(b => {
-              const item = allTaskItems.find(i => i.billboard_id === b.ID && i.task_id === printTaskId);
+              let item = allTaskItems.find(i => i.billboard_id === b.ID && i.task_id === printTaskId);
+              
+              // ✅ إذا لم يكن هناك تصميم محدد في المهمة الحالية، ابحث في المهام الشقيقة لنفس اللوحة
+              if (item && !item.selected_design_id && (!item.design_face_a || item.design_face_a === b.design_face_a)) {
+                const currentTask = tasks.find(t => t.id === printTaskId);
+                if (currentTask) {
+                  const currentType = currentTask.task_type || 'installation';
+                  const currentReinstallNum = currentTask.reinstallation_number ?? null;
+                  
+                  const siblingItem = allTaskItems.find(i => {
+                    if (i.billboard_id !== b.ID || i.task_id === printTaskId) return false;
+                    const t = tasks.find(x => x.id === i.task_id);
+                    if (!t) return false;
+                    if (t.contract_id !== currentTask.contract_id) return false;
+                    if ((t.task_type || 'installation') !== currentType) return false;
+                    if (currentType === 'reinstallation') {
+                      if ((t.reinstallation_number ?? null) !== currentReinstallNum) return false;
+                    }
+                    
+                    // التحقق من تاريخ الإنشاء (خلال 24 ساعة)
+                    if (t.created_at && currentTask.created_at) {
+                      const diffMs = Math.abs(new Date(t.created_at).getTime() - new Date(currentTask.created_at).getTime());
+                      if (diffMs / (1000 * 60 * 60) > 24) return false;
+                    }
+                    return true;
+                  });
+                  
+                  if (siblingItem && siblingItem.selected_design_id) {
+                    item = siblingItem; // استخدام عنصر المهمة الشقيقة لأنه يحتوي على التصميم المختار
+                  }
+                }
+              }
+
+              // ✅ حل تصميم اللوحة بشكل ذكي بناءً على selected_design_id والمهام الشقيقة والعقد لتجنب إظهار تصاميم قديمة أو خاطئة
+              let resolvedDesignA = item?.design_face_a || b.design_face_a;
+              let resolvedDesignB = item?.design_face_b || b.design_face_b;
+              
+              if (item) {
+                const currentTask = tasks.find(t => t.id === item.task_id);
+                const siblingTasks = currentTask ? tasks.filter(t => {
+                  if (t.contract_id !== currentTask.contract_id) return false;
+                  const tType = t.task_type || 'installation';
+                  const itemType = currentTask.task_type || 'installation';
+                  if (tType !== itemType) return false;
+                  if (itemType === 'reinstallation') {
+                    if ((t.reinstallation_number ?? null) !== (currentTask.reinstallation_number ?? null)) return false;
+                  }
+                  
+                  // التحقق من تاريخ الإنشاء (خلال 24 ساعة)
+                  if (t.created_at && currentTask.created_at) {
+                    const diffMs = Math.abs(new Date(t.created_at).getTime() - new Date(currentTask.created_at).getTime());
+                    if (diffMs / (1000 * 60 * 60) > 24) return false;
+                  }
+                  return true;
+                }) : [];
+
+                const localDesigns = siblingTasks.flatMap(t => designsByTask[t.id] || []);
+                const uniqueLocalDesigns = localDesigns.filter((d: any, i: number, arr: any[]) => 
+                  arr.findIndex((x: any) => x.design_face_a_url === d.design_face_a_url) === i
+                );
+
+                const allContractDesigns = tasks
+                  .filter(t => t.contract_id === currentTask?.contract_id || (t.contract_ids && t.contract_ids.includes(currentTask?.contract_id || 0)))
+                  .flatMap(t => designsByTask[t.id] || []);
+                const uniqueContractDesigns = allContractDesigns.filter((d: any, i: number, arr: any[]) => 
+                  arr.findIndex((x: any) => x.design_face_a_url === d.design_face_a_url) === i
+                );
+
+                let matched = null;
+                if (item.selected_design_id) {
+                  matched = uniqueLocalDesigns.find((d: any) => d.id === item.selected_design_id);
+                  if (!matched) {
+                    matched = uniqueContractDesigns.find((d: any) => d.id === item.selected_design_id);
+                  }
+                }
+
+                if (!matched && (item.design_face_a || item.design_face_b)) {
+                  matched = uniqueLocalDesigns.find((d: any) =>
+                    (item.design_face_a && d.design_face_a_url === item.design_face_a) ||
+                    (item.design_face_b && d.design_face_b_url === item.design_face_b)
+                  );
+                  if (!matched) {
+                    matched = uniqueContractDesigns.find((d: any) =>
+                      (item.design_face_a && d.design_face_a_url === item.design_face_a) ||
+                      (item.design_face_b && d.design_face_b_url === item.design_face_b)
+                    );
+                  }
+                }
+
+                // الفولباك الذكي
+                if (!matched && uniqueLocalDesigns.length === 1) {
+                  matched = uniqueLocalDesigns[0];
+                }
+
+                if (matched) {
+                  resolvedDesignA = matched.design_face_a_url || resolvedDesignA;
+                  resolvedDesignB = matched.design_face_b_url || resolvedDesignB;
+                }
+              }
+
               return {
                 ...b,
-                design_face_a: item?.design_face_a || b.design_face_a,
-                design_face_b: item?.design_face_b || b.design_face_b,
+                design_face_a: resolvedDesignA,
+                design_face_b: resolvedDesignB,
                 installed_image_face_a_url: item?.installed_image_face_a_url,
                 installed_image_face_b_url: item?.installed_image_face_b_url,
                 installed_image_url: item?.installed_image_url

@@ -86,6 +86,7 @@ export function UnifiedPrintAllDialog({
   const [tableSettingsDialogOpen, setTableSettingsDialogOpen] = useState(false);
   const [maintenanceStatusesMap, setMaintenanceStatusesMap] = useState<Record<string, { label: string; color: string }>>({});
   const [showBillboardStatusOpt, setShowBillboardStatusOpt] = useState(true);
+  const [printCityInsteadOfMunicipality, setPrintCityInsteadOfMunicipality] = useState(false);
   
   const { settings: customSettings, loading: settingsLoading } = usePrintCustomization();
   const { 
@@ -321,7 +322,7 @@ export function UnifiedPrintAllDialog({
 
       const hasDesigns = designFaceA || designFaceB;
       const name = billboard.Billboard_Name || `لوحة ${item.billboard_id}`;
-      const municipality = billboard.Municipality || '';
+      const municipality = printCityInsteadOfMunicipality ? (billboard.City || '') : (billboard.Municipality || '');
       const district = billboard.District || '';
       const landmark = billboard.Nearest_Landmark || '';
       const size = billboard.Size || '';
@@ -453,14 +454,14 @@ export function UnifiedPrintAllDialog({
             <div class="absolute-field designs-section" style="top: ${toCssLength(s.designs_top)}; left: ${s.designs_left}; width: ${s.designs_width}; display: flex; gap: ${s.designs_gap}; align-items: flex-start;">
               ${designFaceA ? `
                 <div class="design-item">
-                  <div class="design-label">التصميم - الوجه الأمامي</div>
-                  <img src="${designFaceA}" alt="التصميم - الوجه الأمامي" class="design-image" style="max-height: ${s.design_image_height};" />
+                  <div class="design-label">تصميم الوجه الأمامي</div>
+                  <img src="${designFaceA}" alt="تصميم الوجه الأمامي" class="design-image" style="max-height: ${s.design_image_height};" />
                 </div>
               ` : ''}
               ${designFaceB ? `
                 <div class="design-item">
-                  <div class="design-label">التصميم - الوجه الخلفي</div>
-                  <img src="${designFaceB}" alt="التصميم - الوجه الخلفي" class="design-image" style="max-height: ${s.design_image_height};" />
+                  <div class="design-label">تصميم الوجه الخلفي</div>
+                  <img src="${designFaceB}" alt="تصميم الوجه الخلفي" class="design-image" style="max-height: ${s.design_image_height};" />
                 </div>
               ` : ''}
             </div>
@@ -693,7 +694,7 @@ export function UnifiedPrintAllDialog({
           case 'billboard_name': if (billboard.Billboard_Name) columnHasData[col.id] = true; break;
           case 'size': if (billboard.Size) columnHasData[col.id] = true; break;
           case 'faces_count': if (billboard.Faces_Count) columnHasData[col.id] = true; break;
-          case 'location': if (billboard.Municipality || billboard.District) columnHasData[col.id] = true; break;
+          case 'location': if ((printCityInsteadOfMunicipality ? billboard.City : billboard.Municipality) || billboard.District) columnHasData[col.id] = true; break;
           case 'landmark': if (billboard.Nearest_Landmark) columnHasData[col.id] = true; break;
           case 'contract_number': if (item.contract_number || contextNumber) columnHasData[col.id] = true; break;
           case 'installation_date': if (!hideInstallDate && item.installation_date) columnHasData[col.id] = true; break;
@@ -722,6 +723,7 @@ export function UnifiedPrintAllDialog({
         const name = billboard.Billboard_Name || `لوحة ${item.billboard_id}`;
         const size = billboard.Size || '';
         const facesCount = billboard.Faces_Count || 1;
+        const municipality = printCityInsteadOfMunicipality ? (billboard.City || '') : (billboard.Municipality || '');
         const itemContractNumber = item.contract_number || contextNumber;
         const itemAdType = item.ad_type || adType || '';
         
@@ -757,7 +759,7 @@ export function UnifiedPrintAllDialog({
             case 'faces_count':
               return `<td style="font-size: 9px; font-weight: 700;">${facesCount}</td>`;
             case 'location':
-              return `<td style="text-align: right; padding: 4px; font-size: 8px;">${[billboard.Municipality, billboard.District].filter(Boolean).join(' - ') || '-'}</td>`;
+              return `<td style="text-align: right; padding: 4px; font-size: 8px;">${[municipality, billboard.District].filter(Boolean).join(' - ') || '-'}</td>`;
             case 'landmark':
               return `<td style="text-align: right; padding: 4px; font-size: 8px;">${billboard.Nearest_Landmark || '-'}</td>`;
             case 'contract_number':
@@ -1368,6 +1370,17 @@ export function UnifiedPrintAllDialog({
               />
               <Label htmlFor="hideInstallDate" className="cursor-pointer flex-1">
                 إخفاء تاريخ التركيب
+              </Label>
+            </div>
+
+            <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+              <Checkbox
+                id="printCityInsteadOfMunicipality"
+                checked={printCityInsteadOfMunicipality}
+                onCheckedChange={(c) => setPrintCityInsteadOfMunicipality(!!c)}
+              />
+              <Label htmlFor="printCityInsteadOfMunicipality" className="cursor-pointer flex-1">
+                طباعة اسم المدينة بدل البلدية
               </Label>
             </div>
 

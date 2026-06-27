@@ -21,6 +21,7 @@ import {
   MessageCircle,
   MapPin,
   Camera,
+  Package,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -206,6 +207,7 @@ interface RemovalMobileTaskCardProps {
   onSendWhatsApp?: () => void;
   onViewInstalledPhoto?: () => void;
   hasInstalledPhoto?: boolean;
+  onSyncMissing?: () => void;
 }
 
 /* ─────────────────────────────────────────
@@ -224,6 +226,7 @@ export function RemovalMobileTaskCard({
   onSendWhatsApp,
   onViewInstalledPhoto,
   hasInstalledPhoto = false,
+  onSyncMissing,
 }: RemovalMobileTaskCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [dominantColor, setDominantColor] = useState<string | null>(null);
@@ -287,12 +290,12 @@ export function RemovalMobileTaskCard({
       )}
 
       <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
-        {/* ── Main horizontal row ── */}
-        <div className="flex items-stretch" dir="rtl" style={{ minHeight: 160 }}>
+        {/* ── Main horizontal row (responsive) ── */}
+        <div className="flex flex-col md:flex-row md:items-stretch" dir="rtl">
 
-          {/* ── Right: Design Panel (first in DOM = right in RTL) ── */}
+          {/* ── Right: Design Panel (responsive width and height) ── */}
           <div
-            className="w-[170px] shrink-0 overflow-hidden relative pt-1"
+            className="w-full md:w-[170px] h-[200px] md:h-auto shrink-0 overflow-hidden relative pt-1"
             onClick={e => e.stopPropagation()}
           >
             <DesignPanel
@@ -327,7 +330,7 @@ export function RemovalMobileTaskCard({
           </div>
 
           {/* ── Center: Info ── */}
-          <div className="flex-1 min-w-0 px-4 py-4 flex flex-col justify-between gap-2 pt-3">
+          <div className="flex-1 min-w-0 px-4 py-4 flex flex-col justify-between gap-3 pt-3">
 
             {/* Customer name + status */}
             <div className="space-y-1">
@@ -356,9 +359,11 @@ export function RemovalMobileTaskCard({
 
             {/* Metadata row */}
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 font-extrabold px-2 py-0.5 rounded-lg font-mono">
-                #{task.contract_id}
-              </span>
+              {task.contract_id && (
+                <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 font-extrabold px-2 py-0.5 rounded-lg font-mono">
+                  #{task.contract_id}
+                </span>
+              )}
               {task.adType && task.adType !== '—' && (
                 <span className="inline-flex items-center gap-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 font-bold px-2 py-0.5 rounded-lg">
                   {task.adType}
@@ -424,9 +429,9 @@ export function RemovalMobileTaskCard({
             </CollapsibleTrigger>
           </div>
 
-          {/* ── Left: Actions column ── */}
+          {/* ── Left: Actions column (responsive layout) ── */}
           <div
-            className="w-[160px] shrink-0 p-3 flex flex-col justify-between items-stretch border-r border-border/30 pt-4"
+            className="w-full md:w-[160px] shrink-0 p-3 flex flex-col justify-between items-stretch border-t md:border-t-0 md:border-r border-border/30 pt-4"
             onClick={e => e.stopPropagation()}
           >
             {/* Action buttons */}
@@ -447,10 +452,22 @@ export function RemovalMobileTaskCard({
                   size="sm"
                   variant="outline"
                   onClick={() => onPrintPending()}
-                  className="w-full h-8 rounded-xl font-bold text-xs gap-1 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all"
+                  className="w-full h-8 rounded-xl font-bold text-xs gap-1 border-amber-500/20 text-amber-500 hover:bg-amber-500/10 hover:border-amber-500/50 hover:text-amber-500 transition-all animate-pulse"
                 >
                   <Printer className="h-3.5 w-3.5" />
-                  طباعة
+                  طباعة المعلقة
+                </Button>
+              )}
+
+              {items.some((i: any) => i.status === 'completed') && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onPrintCompleted()}
+                  className="w-full h-8 rounded-xl font-bold text-xs gap-1 border-emerald-500/20 text-emerald-500 hover:bg-emerald-500/10 hover:border-emerald-500/50 hover:text-emerald-500 transition-all"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  طباعة المكتملة
                 </Button>
               )}
 
@@ -477,6 +494,18 @@ export function RemovalMobileTaskCard({
                   تراجع
                 </Button>
               )}
+
+              {onSyncMissing && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onSyncMissing()}
+                  className="w-full h-8 rounded-xl font-bold text-xs gap-1 border-blue-500/20 text-blue-500 hover:bg-blue-500/10 hover:border-blue-500/50 transition-all"
+                >
+                  <Package className="h-3.5 w-3.5" />
+                  إضافة الناقصة
+                </Button>
+              )}
             </div>
 
             {/* Delete button at bottom */}
@@ -484,7 +513,7 @@ export function RemovalMobileTaskCard({
               size="sm"
               variant="outline"
               onClick={() => onDelete()}
-              className="w-full h-8 rounded-xl font-bold text-xs gap-1 text-destructive border-destructive/20 hover:bg-destructive/10 hover:border-destructive/40 transition-all mt-auto"
+              className="w-full h-8 rounded-xl font-bold text-xs gap-1 text-destructive border-destructive/20 hover:bg-destructive/10 hover:border-destructive/40 transition-all mt-3 md:mt-auto"
             >
               <Trash2 className="h-3.5 w-3.5" />
               حذف
