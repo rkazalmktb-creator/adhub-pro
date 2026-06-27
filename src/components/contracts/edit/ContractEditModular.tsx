@@ -940,11 +940,11 @@ export default function ContractEditModular() {
       if (statusFilter === 'all') {
         shouldShow = !isHidden; // hide hidden by default in 'all'
       } else if (statusFilter === 'available') {
-        shouldShow = (isAvailable || isNear || isInContract) && !isHidden;
+        shouldShow = isAvailable && !isHidden;
       } else if (statusFilter === 'nearExpiry') {
         shouldShow = isNear && !isHidden;
       } else if (statusFilter === 'rented') {
-        shouldShow = !isAvailable && !isNear && !isHidden;
+        shouldShow = !isAvailable && !isHidden;
       } else if (statusFilter === 'hidden') {
         shouldShow = isHidden;
       }

@@ -181,9 +181,9 @@ export const BillboardSelector: React.FC<BillboardSelectorProps> = ({
       if (statusFilter === 'all') {
         shouldShow = true;
       } else if (statusFilter === 'available') {
-        shouldShow = (isAvailable && !isRented) || isNear || isInContract;
+        shouldShow = (isAvailable && !isRented) || isInContract;
       } else if (statusFilter === 'rented') {
-        shouldShow = isRented && !isNear;
+        shouldShow = isRented;
       }
 
       return matchesQ && matchesCity && matchesSize && shouldShow;

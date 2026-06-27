@@ -832,11 +832,11 @@ export default function OfferEdit() {
       if (statusFilter === 'all') {
         shouldShow = !isHidden && !isUnderMaintenance;
       } else if (statusFilter === 'available') {
-        shouldShow = (isAvail || isNear) && !isHidden && !isUnderMaintenance;
+        shouldShow = isAvail && !isHidden && !isUnderMaintenance;
       } else if (statusFilter === 'nearExpiry') {
         shouldShow = isNear && !isHidden && !isUnderMaintenance;
       } else if (statusFilter === 'rented') {
-        shouldShow = !isAvail && !isNear && !isHidden && !isUnderMaintenance;
+        shouldShow = !isAvail && !isHidden && !isUnderMaintenance;
       } else if (statusFilter === 'maintenance') {
         shouldShow = isUnderMaintenance;
       } else if (statusFilter === 'hidden') {
