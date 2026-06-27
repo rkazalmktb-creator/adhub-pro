@@ -70,12 +70,11 @@ export function ExpiredContractsAlert({
       const fourMonthsAgo = subMonths(today, 4);
       const fourMonthsAgoStr = fourMonthsAgo.toISOString().split('T')[0];
       
-      // 1. جلب العقود المنتهية من جدول العقود (خلال آخر 4 أشهر فقط كما طلب المستخدم)
       const { data: contractsData, error } = await (supabase as any)
         .from('Contract')
         .select('Contract_Number, "Customer Name", "Ad Type", "End Date", billboard_ids, ignore_removal_alert')
-        .lte('"End Date"', today.toISOString())
-        .gte('"End Date"', fourMonthsAgo.toISOString())
+        .lte('End Date', today.toISOString())
+        .gte('End Date', fourMonthsAgo.toISOString())
         .order('"End Date"', { ascending: false });
       
       if (error) throw error;
@@ -84,7 +83,7 @@ export function ExpiredContractsAlert({
       const { data: activeContracts } = await supabase
         .from('Contract')
         .select('Contract_Number, billboard_ids')
-        .gt('"End Date"', todayStr);
+        .gt('End Date', todayStr);
       
       // استخراج معرفات اللوحات المؤجرة حالياً في عقود نشطة
       const rentedBillboardIds = new Set<number>();

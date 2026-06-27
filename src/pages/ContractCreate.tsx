@@ -514,8 +514,8 @@ export default function ContractCreate() {
         // 2) Load active contracts to cross-check billboard_ids
         const { data: activeContracts } = await supabase
           .from('Contract')
-          .select('"Contract_Number", billboard_ids, "End Date"')
-          .gte('"End Date"', today);
+          .select('Contract_Number, billboard_ids, "End Date"')
+          .gte('End Date', today);
 
         // Build a set of billboard IDs that are in active contracts
         const occupiedIds = new Set<number>();

@@ -118,7 +118,7 @@ export function AddInstallationTaskDialog({
         .select('Contract_Number, "Customer Name", "Ad Type", "End Date", "Contract Date", billboard_ids');
       
       if (taskType === 'reinstallation') {
-        query = query.gte('"End Date"', today);
+        query = query.gte('End Date', today);
       }
       
       const { data, error } = await query.order('Contract_Number', { ascending: false }).limit(500);

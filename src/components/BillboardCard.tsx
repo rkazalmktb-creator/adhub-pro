@@ -96,7 +96,7 @@ export const BillboardGridCard: React.FC<BillboardGridCardProps> = ({
           .from('Contract')
           .select('Contract_Number, "Customer Name", "Ad Type", "Contract Date", "End Date", billboard_ids, billboard_prices')
           .or(`billboard_ids.ilike."%25,${idStr},%25",billboard_ids.ilike."${idStr},%25",billboard_ids.ilike."%25,${idStr}",billboard_ids.eq.${idStr}`)
-          .gte('"End Date"', today)
+          .gte('End Date', today)
           .order('"End Date"', { ascending: false })
           .limit(1)
           .maybeSingle();

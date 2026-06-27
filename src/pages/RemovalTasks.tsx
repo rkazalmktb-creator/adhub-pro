@@ -220,8 +220,8 @@ export default function RemovalTasks() {
       const { data, error } = await supabase
         .from('Contract')
         .select('Contract_Number, "Customer Name", billboard_ids, "Ad Type", "Contract Date", "End Date", design_data')
-        .lte('"End Date"', new Date().toISOString())
-        .gte('"End Date"', '2025-10-01')
+        .lte('End Date', new Date().toISOString())
+        .gte('End Date', '2025-10-01')
         .order('Contract_Number', { ascending: false })
         .limit(500);
       if (error) throw error;
@@ -577,8 +577,8 @@ export default function RemovalTasks() {
       const { data, error } = await supabase
         .from('Contract')
         .select('Contract_Number, "Customer Name", billboard_ids, "Ad Type", "Contract Date", "End Date"')
-        .lte('"End Date"', new Date().toISOString())
-        .gte('"End Date"', '2025-10-01')
+        .lte('End Date', new Date().toISOString())
+        .gte('End Date', '2025-10-01')
         .order('Contract_Number', { ascending: false })
         .limit(500);
       if (error) throw error;

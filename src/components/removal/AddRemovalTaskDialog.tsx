@@ -81,8 +81,8 @@ export function AddRemovalTaskDialog({
       const { data, error } = await supabase
         .from('Contract')
         .select('Contract_Number, "Customer Name", "Ad Type", "End Date", billboard_ids, "Contract Date"')
-        .lte('"End Date"', today.toISOString())
-        .gte('"End Date"', sixMonthsAgo.toISOString())
+        .lte('End Date', today.toISOString())
+        .gte('End Date', sixMonthsAgo.toISOString())
         .order('"End Date"', { ascending: false })
         .limit(500);
       
@@ -115,7 +115,7 @@ export function AddRemovalTaskDialog({
       const { data: activeContracts } = await supabase
         .from('Contract')
         .select('billboard_ids')
-        .gte('"End Date"', todayStr);
+        .gte('End Date', todayStr);
       
       // استخراج معرفات اللوحات المؤجرة حالياً
       const rentedBillboardIds = new Set<number>();

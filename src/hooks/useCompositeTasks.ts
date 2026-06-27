@@ -240,6 +240,82 @@ export const useCompositeTasks = (customerId?: string) => {
         }
       }
 
+      // 1. Fetch current items of installation_task to get updated installation cost
+      let newCustomerInstall = 0;
+      let newCompanyInstall = 0;
+      if (task.installation_task_id) {
+        const { data: installItems } = await supabase
+          .from('installation_task_items')
+          .select('customer_installation_cost, company_installation_cost, additional_cost, reinstall_count, customer_original_install_cost, customer_reinstall_cost')
+          .eq('task_id', task.installation_task_id);
+        if (installItems) {
+          installItems.forEach(i => {
+            const isReinstalled = (i.reinstall_count || 0) > 0;
+            const itemCost = isReinstalled
+              ? (Number(i.customer_original_install_cost) || 0) + (Number(i.customer_reinstall_cost) || Number(i.customer_installation_cost) || 0)
+              : (Number(i.customer_installation_cost) || 0);
+            newCustomerInstall += itemCost;
+            newCompanyInstall += (Number(i.company_installation_cost) || 0) + (Number(i.additional_cost) || 0);
+          });
+        }
+      }
+
+      // 2. Fetch current total of print_task
+      let newCustomerPrint = 0;
+      let newCompanyPrint = 0;
+      if (task.print_task_id) {
+        const { data: printTask } = await supabase
+          .from('print_tasks')
+          .select('customer_total_amount, total_cost')
+          .eq('id', task.print_task_id)
+          .single();
+        if (printTask) {
+          newCustomerPrint = Number(printTask.customer_total_amount) || 0;
+          newCompanyPrint = Number(printTask.total_cost) || 0;
+        }
+      }
+
+      // 3. Fetch current total of cutout_task
+      let newCustomerCutout = 0;
+      let newCompanyCutout = 0;
+      if (task.cutout_task_id) {
+        const { data: cutoutTask } = await supabase
+          .from('cutout_tasks')
+          .select('customer_total_amount, total_cost')
+          .eq('id', task.cutout_task_id)
+          .single();
+        if (cutoutTask) {
+          newCustomerCutout = Number(cutoutTask.customer_total_amount) || 0;
+          newCompanyCutout = Number(cutoutTask.total_cost) || 0;
+        }
+      }
+
+      // Calculate totals
+      const discountAmount = task.discount_amount || 0;
+      const customerSubtotal = newCustomerInstall + newCustomerPrint + newCustomerCutout;
+      const customerTotal = customerSubtotal - discountAmount;
+      const companyTotal = newCompanyInstall + newCompanyPrint + newCompanyCutout;
+      const netProfit = customerTotal - companyTotal;
+      const profitPercentage = customerTotal > 0 ? (netProfit / customerTotal) * 100 : 0;
+
+      // Update the composite task with recalculated values in the database first
+      await supabase
+        .from('composite_tasks')
+        .update({
+          customer_installation_cost: newCustomerInstall,
+          company_installation_cost: newCompanyInstall,
+          customer_print_cost: newCustomerPrint,
+          company_print_cost: newCompanyPrint,
+          customer_cutout_cost: newCustomerCutout,
+          company_cutout_cost: newCompanyCutout,
+          customer_total: customerTotal,
+          company_total: companyTotal,
+          net_profit: netProfit,
+          profit_percentage: profitPercentage,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', taskId);
+
       // توليد رقم فاتورة فريد
       const invoiceNumber = `CT-${task.contract_id}-${Date.now()}`;
 
@@ -253,13 +329,13 @@ export const useCompositeTasks = (customerId?: string) => {
           contract_number: task.contract_id || 0,
           printer_name: 'مهمة مجمعة',
           invoice_date: new Date().toISOString().split('T')[0],
-          total_amount: task.customer_total || 0,
+          total_amount: customerTotal,
           paid_amount: 0,
           paid: false,
           notes: `فاتورة موحدة للمهمة المجمعة - عقد #${task.contract_id}\n` +
-                 `تركيب: ${task.customer_installation_cost || 0} د.ل\n` +
-                 (task.customer_print_cost ? `طباعة: ${task.customer_print_cost} د.ل\n` : '') +
-                 (task.customer_cutout_cost ? `قص: ${task.customer_cutout_cost} د.ل\n` : '') +
+                 `تركيب: ${newCustomerInstall || 0} د.ل\n` +
+                 (newCustomerPrint ? `طباعة: ${newCustomerPrint} د.ل\n` : '') +
+                 (newCustomerCutout ? `قص: ${newCustomerCutout} د.ل\n` : '') +
                  (task.notes ? `\nملاحظات: ${task.notes}` : ''),
           invoice_type: 'composite_task',
           locked: false
@@ -282,10 +358,6 @@ export const useCompositeTasks = (customerId?: string) => {
       if (updateError) throw updateError;
 
       // ✅ إضافة سجل الدين في حساب الزبون مع ربطه بالفاتورة
-      const customerTotal = task.customer_total || 
-        ((task.customer_installation_cost || 0) + (task.customer_print_cost || 0) + (task.customer_cutout_cost || 0) 
-         - (task.discount_amount || 0));
-      
       await supabase.from('customer_payments').insert({
         customer_id: task.customer_id,
         customer_name: task.customer_name,

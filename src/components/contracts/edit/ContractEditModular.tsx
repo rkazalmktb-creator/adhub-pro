@@ -154,7 +154,7 @@ export default function ContractEditModular() {
         const today = new Date().toISOString().split('T')[0];
         const [data, contractsResult] = await Promise.all([
           loadBillboards(),
-          supabase.from('Contract').select('"Contract_Number", billboard_ids, "End Date"').gte('"End Date"', today)
+          supabase.from('Contract').select('Contract_Number, billboard_ids, "End Date"').gte('End Date', today)
         ]);
         setBillboards(data);
 

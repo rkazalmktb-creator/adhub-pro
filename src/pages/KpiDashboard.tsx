@@ -58,7 +58,7 @@ const KpiDashboard = () => {
       // Parallel queries
       const [billboardsRes, contractsRes, paymentsRes, costCentersRes] = await Promise.all([
         supabase.from('billboards').select('ID, Status, Size, Level, Price, City'),
-        supabase.from('Contract').select('Contract_Number, "Customer Name", "Ad Type", Total, "Total Rent", Discount, installation_cost, "Contract Date", "End Date", customer_id, billboards_count').gte('"End Date"', startDate),
+        supabase.from('Contract').select('Contract_Number, "Customer Name", "Ad Type", Total, "Total Rent", Discount, installation_cost, "Contract Date", "End Date", customer_id, billboards_count').gte('End Date', startDate),
         supabase.from('customer_payments').select('amount, entry_type, paid_at, customer_name').gte('paid_at', startDate).lte('paid_at', endDate),
         supabase.from('billboard_cost_centers').select('billboard_id, cost_type, amount, frequency'),
       ]);

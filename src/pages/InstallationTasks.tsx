@@ -724,9 +724,8 @@ export default function InstallationTasks() {
         .from('Contract')
         .select('Contract_Number, "Customer Name", "Ad Type", "End Date", "Contract Date", billboard_ids');
       
-      // إذا كان نوع المهمة "إعادة تركيب"، اعرض جميع العقود الساريه المفعول
       if (taskType === 'reinstallation') {
-        query = query.gte('"End Date"', today);
+        query = query.gte('End Date', today);
       }
       
       const { data, error } = await query.order('Contract_Number', { ascending: false });
