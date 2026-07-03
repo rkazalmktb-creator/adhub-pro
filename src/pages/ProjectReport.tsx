@@ -374,7 +374,9 @@ const ProjectReport = () => {
                   <p className="font-semibold">{formatCurrencyLYD(totalExpenses)}</p>
                 </div>
                 <div className="p-2 rounded bg-muted/50 text-center">
-                  <p className="text-xs text-muted-foreground">المتبقي على الزبون</p>
+                  <p className="text-xs text-muted-foreground">
+                    {clientRemaining < 0 ? "رصيد دائن للزبون" : clientRemaining === 0 ? "المتبقي على الزبون (مسدد)" : "المتبقي على الزبون"}
+                  </p>
                   <p className={`font-semibold ${clientRemaining > 0 ? 'text-destructive' : 'text-green-600'}`}>{formatCurrencyLYD(Math.abs(clientRemaining))}</p>
                 </div>
               </div>
@@ -724,7 +726,7 @@ const ProjectReport = () => {
                   <tr>
                     <th>قيمة البنود</th>
                     <th>المدفوع من الزبون</th>
-                    <th>المتبقي على الزبون</th>
+                    <th>{clientRemaining < 0 ? "رصيد دائن للزبون" : "المتبقي على الزبون"}</th>
                     {!isClientReport && (
                       <>
                         <th>إجمالي التكاليف</th>
@@ -737,7 +739,9 @@ const ProjectReport = () => {
                   <tr>
                     <td>{formatCurrencyLYD(totalItemsValue)}</td>
                     <td style={{ color: '#1a5f1a', fontWeight: 'bold' }}>{formatCurrencyLYD(totalClientPaid)}</td>
-                    <td style={{ color: clientRemaining > 0 ? '#b91c1c' : '#1a5f1a', fontWeight: 'bold' }}>{formatCurrencyLYD(clientRemaining)}</td>
+                    <td style={{ color: clientRemaining > 0 ? '#b91c1c' : '#1a5f1a', fontWeight: 'bold' }}>
+                      {clientRemaining < 0 ? `${formatCurrencyLYD(Math.abs(clientRemaining))} (له)` : clientRemaining === 0 ? "0 د.ل (مسدد)" : formatCurrencyLYD(clientRemaining)}
+                    </td>
                     {!isClientReport && (
                       <>
                         <td style={{ color: '#b91c1c', fontWeight: 'bold' }}>{formatCurrencyLYD(totalCosts)}</td>

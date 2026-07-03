@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ProjectNavBar } from "@/components/layout/ProjectNavBar";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { toast as sonnerToast } from "sonner";
 import {
   ArrowRight,
   Printer,
@@ -41,6 +42,10 @@ import {
   ClipboardCheck,
   GitBranch,
   CalendarDays,
+  Upload,
+  Clipboard,
+  Trash2,
+  Loader2
 } from "lucide-react";
 import { formatCurrencyLYD } from "@/lib/currency";
 
@@ -86,6 +91,76 @@ const ManageProject = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const isEdit = !!id;
+
+  const [showImageUrlInput, setShowImageUrlInput] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        sonnerToast.error("حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 2 ميجابايت");
+        return;
+      }
+      try {
+        setUploadingImage(true);
+        const uploadToast = sonnerToast.loading("جاري رفع الصورة للموقع المعتمد...");
+        const { uploadImage } = await import("@/services/imageUploadService");
+        const uploadedUrl = await uploadImage(file);
+        setValue("image_url", uploadedUrl);
+        sonnerToast.dismiss(uploadToast);
+        sonnerToast.success("تم رفع صورة المشروع بنجاح");
+      } catch (err: any) {
+        sonnerToast.error("فشل رفع الصورة: " + err.message);
+      } finally {
+        setUploadingImage(false);
+      }
+    }
+  };
+
+  const handlePasteFromClipboard = async () => {
+    if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
+      sonnerToast.error("لصق الصور برمجياً غير مدعوم في هذا الاتصال. يرجى تشغيل النظام على HTTPS أو localhost، أو لصق الصورة يدوياً (Ctrl + V) بداخل حقل الإدخال.");
+      return;
+    }
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith("image/")) {
+            setUploadingImage(true);
+            const uploadToast = sonnerToast.loading("جاري رفع الصورة المنسوخة من الحافظة...");
+            const blob = await item.getType(type);
+            const file = new File([blob], `project-clip-${Date.now()}.png`, { type });
+            const { uploadImage } = await import("@/services/imageUploadService");
+            const uploadedUrl = await uploadImage(file);
+            setValue("image_url", uploadedUrl);
+            sonnerToast.dismiss(uploadToast);
+            sonnerToast.success("تم رفع الصورة من الحافظة بنجاح");
+            setUploadingImage(false);
+            return;
+          }
+        }
+      }
+      
+      const text = await navigator.clipboard.readText();
+      if (text.startsWith("http://") || text.startsWith("https://")) {
+        setValue("image_url", text);
+        sonnerToast.success("تم لصق الرابط من الحافظة");
+        return;
+      }
+      sonnerToast.error("لم يتم العثور على صورة أو رابط صالح في الحافظة. يرجى نسخ صورة أو رابط أولاً.");
+    } catch (err: any) {
+      sonnerToast.error("فشل قراءة الحافظة: " + err.message);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleClearImage = () => {
+    setValue("image_url", "");
+    sonnerToast.success("تم إزالة الصورة");
+  };
 
   const getReturnPath = () => {
     if (returnTo) return returnTo;
@@ -535,24 +610,94 @@ const ManageProject = () => {
         <Card className="p-5 space-y-4">
           <SectionTitle icon={Image} title="الصورة والملاحظات" />
 
-          <div className="flex gap-4 items-start">
-            <div className="flex-1 space-y-2">
-              <Label className="flex items-center gap-1.5">
-                <Link2 className="h-3.5 w-3.5 text-muted-foreground" />
-                رابط صورة المشروع
+          <div className="space-y-4">
+            <div className="flex flex-col gap-2">
+              <Label className="text-sm font-semibold flex items-center gap-1.5">
+                <Image className="h-4 w-4 text-primary" />
+                صورة المشروع
               </Label>
-              <Input
-                id="image_url"
-                {...register("image_url")}
-                placeholder="https://example.com/image.jpg"
-              />
+              
+              <div className="flex flex-wrap items-center gap-2">
+                {/* File picker */}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  id="project-image-file-picker"
+                  className="hidden"
+                />
+                
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={uploadingImage}
+                  onClick={() => document.getElementById("project-image-file-picker")?.click()}
+                  className="cursor-pointer gap-2 hover:bg-primary/10"
+                >
+                  {uploadingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4 text-muted-foreground" />}
+                  تحميل صورة
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={uploadingImage}
+                  onClick={handlePasteFromClipboard}
+                  className="cursor-pointer gap-2 hover:bg-primary/10"
+                >
+                  <Clipboard className="h-4 w-4 text-muted-foreground" />
+                  لصق صورة أو رابط
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowImageUrlInput(!showImageUrlInput)}
+                  className="cursor-pointer gap-2 text-muted-foreground"
+                >
+                  <Link2 className="h-4 w-4" />
+                  {showImageUrlInput ? "إخفاء خانة الرابط" : "إدخال رابط يدوياً"}
+                </Button>
+
+                {watch("image_url") && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearImage}
+                    className="cursor-pointer gap-2 text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    إزالة الصورة
+                  </Button>
+                )}
+              </div>
             </div>
+
+            {/* Hidden Input toggled by state */}
+            {showImageUrlInput && (
+              <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                <Label htmlFor="image_url" className="text-xs text-muted-foreground">رابط الصورة المباشر (URL)</Label>
+                <Input
+                  id="image_url"
+                  {...register("image_url")}
+                  placeholder="https://example.com/image.jpg"
+                  className="border-border text-left"
+                  dir="ltr"
+                />
+              </div>
+            )}
+
+            {/* Preview Section */}
             {watch("image_url") && (
-              <div className="w-24 h-20 border rounded-lg overflow-hidden bg-muted flex-shrink-0">
+              <div className="relative group w-40 h-28 border border-border rounded-lg overflow-hidden bg-muted flex items-center justify-center">
                 <img
                   src={watch("image_url")}
-                  alt="معاينة"
-                  className="w-full h-full object-cover"
+                  alt="معاينة صورة المشروع"
+                  className="w-full h-full object-contain p-1"
                   onError={(e) => {
                     (e.target as HTMLImageElement).style.display = "none";
                   }}

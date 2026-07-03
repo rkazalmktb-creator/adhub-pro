@@ -170,6 +170,16 @@ export function generatePrintStyles(settings: PrintSettings | null | undefined) 
     ` : ''}
   `;
 
+  const iconColor = v.footerIconColor || '#555555';
+  const phoneSvgRaw = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>`;
+  const pinSvgRaw = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>`;
+
+  const phoneBase64 = typeof window !== 'undefined' ? window.btoa(unescape(encodeURIComponent(phoneSvgRaw))) : '';
+  const pinBase64 = typeof window !== 'undefined' ? window.btoa(unescape(encodeURIComponent(pinSvgRaw))) : '';
+
+  const phoneDataUri = phoneBase64 ? `data:image/svg+xml;base64,${phoneBase64}` : '';
+  const pinDataUri = pinBase64 ? `data:image/svg+xml;base64,${pinBase64}` : '';
+
   return `
     ${fontImports}
 
@@ -181,30 +191,27 @@ export function generatePrintStyles(settings: PrintSettings | null | undefined) 
       margin-right: ${v.padRight}mm !important;
       
       @bottom-left {
-        content: "\u0635\u0641\u062d\u0629 " counter(page) " \u0645\u0646 " counter(pages);
+        content: "صفحة " counter(page) " من " counter(pages);
         font-family: '${v.printFontFamily}', 'Tajawal', sans-serif;
         font-size: ${Math.max(7.5, v.footerFontSize - 1.5)}pt !important;
         color: #555 !important;
         white-space: nowrap;
         vertical-align: top;
-        padding-top: 4mm;
+        padding-top: 3mm;
         text-align: left;
       }
       
       @bottom-right {
-        content: "${v.footerEnabled && (v.companyPhone || v.companyAddress) ? `هاتف: ${v.companyPhone || ''} \u00a0\u00a0\u00a0\u00a0 العنوان: ${v.companyAddress || ''}` : ''}";
+        content: ${v.footerEnabled && phoneDataUri && pinDataUri ? `url("${phoneDataUri}") " ${v.companyPhone || ''} \\a0\\a0\\a0\\a0\\a0\\a0 " url("${pinDataUri}") " ${v.companyAddress || ''}"` : '""'};
         font-family: '${v.printFontFamily}', 'Tajawal', sans-serif;
         font-size: ${Math.max(7.5, v.footerFontSize - 1.5)}pt !important;
         color: #555 !important;
         white-space: nowrap;
         vertical-align: top;
-        padding-top: 4mm;
+        padding-top: 3.5mm;
         text-align: right;
       }
-      
-      @bottom-center {
-        content: "";
-      }
+      @bottom-center { content: ""; }
     }
     
     .print-date {
@@ -720,12 +727,13 @@ export function generatePrintStyles(settings: PrintSettings | null | undefined) 
       
       /* Fixed footer repeating on every page (renders only the divider line) */
       .print-footer-fixed {
-        display: block !important;
+        display: ${v.footerEnabled ? 'block' : 'none'} !important;
         position: fixed;
-        bottom: 0;
+        bottom: 0 !important;
         left: ${v.padLeft}mm;
         right: ${v.padRight}mm;
-        height: 0;
+        height: 0 !important;
+        overflow: hidden;
         z-index: 999;
         border-top: 1px solid #ccc;
         background-color: transparent !important;
@@ -866,9 +874,9 @@ export function openPrintWindow(
       </tbody>
       <tfoot>
         <tr>
-          <td>
-            <!-- Spacer to reserve space for the fixed footer at the bottom of each page -->
-            <div style="height: ${v.footerHeight}mm;"></div>
+          <td style="padding: 0;">
+            <!-- Spacer so content doesn't slip behind the fixed footer -->
+            <div style="height: ${v.footerEnabled ? Math.max(v.padBottom, v.footerHeight + 2) : 0}mm;"></div>
           </td>
         </tr>
       </tfoot>

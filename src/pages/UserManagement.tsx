@@ -304,11 +304,35 @@ const UserManagement = () => {
   });
 
   const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast({
-      title: "تم النسخ",
-      description: "تم نسخ الرمز إلى الحافظة",
-    });
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      navigator.clipboard.writeText(text);
+      toast({
+        title: "تم النسخ",
+        description: "تم نسخ الرمز إلى الحافظة",
+      });
+    } else {
+      // Fallback method for non-secure HTTP contexts
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      try {
+        document.execCommand("copy");
+        toast({
+          title: "تم النسخ",
+          description: "تم نسخ الرمز إلى الحافظة (عبر آلية احتياطية)",
+        });
+      } catch (err) {
+        toast({
+          title: "فشل النسخ",
+          description: "يرجى تحديد النص ونسخه يدوياً",
+          variant: "destructive"
+        });
+      }
+      document.body.removeChild(textarea);
+    }
   };
 
   const getRoleBadge = (role: string | null) => {

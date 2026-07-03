@@ -520,13 +520,15 @@ const ProjectPhases = () => {
     
     // Fetch detailed data for the phase
     const [{ data: items }, { data: purchases }, { data: expenses }, { data: rentalPurchases }, { data: allocations }] = await Promise.all([
-      supabase.from("project_items").select("name, description, quantity, unit_price, total_price, measurement_type, length, width, height, measurement_factor, component_values, measurement_config_id, measurement_configs(name, unit_symbol), engineers(name), project_item_technicians(total_cost)").eq("phase_id", phase.id),
+      supabase.from("project_items").select("id, name, description, quantity, unit_price, total_price, measurement_type, length, width, height, measurement_factor, component_values, measurement_config_id, measurement_configs(name, unit_symbol), engineers(name), project_item_technicians(total_cost)").eq("phase_id", phase.id),
       supabase.from("purchases").select("*, suppliers(name)").eq("phase_id", phase.id).is("rental_id", null),
       supabase.from("expenses").select("*").eq("phase_id", phase.id),
       supabase.from("purchases").select("*, equipment_rentals(equipment(name), start_date, end_date, daily_rate)").eq("phase_id", phase.id).not("rental_id", "is", null),
       supabase.from("client_payment_allocations")
         .select(`
           amount,
+          reference_type,
+          reference_id,
           client_payments (
             date,
             payment_method,
@@ -598,7 +600,7 @@ const ProjectPhases = () => {
       const processedItems = items.map((item: any, idx: number) => {
         const componentLabels: Record<string, string> = { L: 'الطول', W: 'العرض', H: 'الارتفاع', D: 'القطر', T: 'السُمك' };
         const cv = item.component_values as Record<string, number> | null;
-        let dims = '-';
+        let dims = '';
         if (cv && Object.keys(cv).length > 0) {
           dims = Object.entries(cv).map(([k, v]) => `${componentLabels[k] || k}:${v}`).join(' × ');
         } else {
@@ -610,13 +612,22 @@ const ProjectPhases = () => {
           if (parts) dims = parts;
         }
 
+        const cleanDesc = (item.description || "").trim();
+        const displayDesc = (cleanDesc === "" || cleanDesc === "-") ? "" : cleanDesc;
+
+        const cleanUnit = (item.measurement_configs?.name || item.measurement_configs?.unit_symbol || getMeasurementLabel(item.measurement_type) || "").trim();
+        const displayUnit = (cleanUnit === "" || cleanUnit === "-") ? "" : cleanUnit;
+
+        const cleanFactor = item.measurement_factor !== undefined && item.measurement_factor !== null ? String(item.measurement_factor).trim() : "";
+        const displayFactor = (cleanFactor === "" || cleanFactor === "-" || cleanFactor === "1" || cleanFactor === "0") ? "" : cleanFactor;
+
         return {
           idx: idx + 1,
           name: item.name || '',
-          description: item.description || '-',
-          unit: item.measurement_configs?.name || item.measurement_configs?.unit_symbol || getMeasurementLabel(item.measurement_type) || '-',
-          dims: dims,
-          factor: item.measurement_factor || '-',
+          description: displayDesc,
+          unit: displayUnit,
+          dims: (dims === "" || dims === "-") ? "" : dims,
+          factor: displayFactor,
           quantity: item.quantity,
           unit_price: item.unit_price,
           total_price: item.total_price
@@ -624,18 +635,33 @@ const ProjectPhases = () => {
       });
 
       // Check which columns are active
-      const hasDescription = processedItems.some(r => r.description !== "-" && r.description !== "");
-      const hasDims = processedItems.some(r => r.dims !== "-" && r.dims !== "");
-      const hasFactor = processedItems.some(r => r.factor !== "-" && r.factor !== "" && r.factor !== 1 && r.factor !== "1");
+      const hasDescription = processedItems.some(r => r.description !== "");
+      const hasDims = processedItems.some(r => r.dims !== "");
+      const hasFactor = processedItems.some(r => r.factor !== "" && r.factor !== "1" && Number(r.factor) !== 1);
+
+      // Distribute the remaining 51% width dynamically
+      const varCols = [
+        { key: 'name', header: "البند", defaultWidth: 18, align: "right", active: true },
+        { key: 'description', header: "الوصف", defaultWidth: 18, align: "right", active: hasDescription },
+        { key: 'dims', header: "الأبعاد", defaultWidth: 15, align: "center", active: hasDims },
+        { key: 'factor', header: "عدد العناصر", defaultWidth: 10, align: "center", active: hasFactor }
+      ];
+      const activeVar = varCols.filter(c => c.active);
+      const totalVarDefault = activeVar.reduce((sum, c) => sum + c.defaultWidth, 0);
 
       // Define columns dynamically
       const cols = [
         { header: "#", width: "5%", align: "center", render: (r: any) => `${r.idx}` },
-        { header: "البند", width: hasDescription ? "20%" : "auto", align: "right", render: (r: any) => `${r.name}` },
-        ...(hasDescription ? [{ header: "الوصف", width: "auto", align: "right", render: (r: any) => `${r.description}` }] : []),
-        { header: "نوع القياس", width: "10%", align: "center", render: (r: any) => `${r.unit}` },
-        ...(hasDims ? [{ header: "الأبعاد", width: "16%", align: "center", render: (r: any) => `${r.dims}` }] : []),
-        ...(hasFactor ? [{ header: "عدد العناصر", width: "10%", align: "center", render: (r: any) => `${r.factor}` }] : []),
+        ...activeVar.map(c => {
+          const w = totalVarDefault > 0 ? Math.round((c.defaultWidth / totalVarDefault) * 51) : 51;
+          return {
+            header: c.header,
+            width: `${w}%`,
+            align: c.align,
+            render: (r: any) => `${r[c.key] || "-"}`
+          };
+        }),
+        { header: "نوع القياس", width: "10%", align: "center", render: (r: any) => `${r.unit || "-"}` },
         { header: "الكمية", width: "10%", align: "center", render: (r: any) => `${r.quantity}` },
         { header: "سعر الوحدة", width: "12%", align: "center", render: (r: any) => `${formatCurrencyLYD(r.unit_price)}` },
         { header: "الإجمالي", width: "12%", align: "center", render: (r: any) => `<span style="font-weight: bold;">${formatCurrencyLYD(r.total_price)}</span>` }
@@ -673,26 +699,50 @@ const ProjectPhases = () => {
       const purchasesTotal = purchases.reduce((s, p) => s + Number(p.total_amount || 0), 0);
       
       const processedPurchases = purchases.map((p: any, idx: number) => {
+        const cleanSupplier = (p.suppliers?.name || "").trim();
+        const displaySupplier = (cleanSupplier === "" || cleanSupplier === "-") ? "" : cleanSupplier;
+
+        const cleanInvoiceNum = (p.invoice_number || "").trim();
+        const displayInvoiceNum = (cleanInvoiceNum === "" || cleanInvoiceNum === "-") ? "" : cleanInvoiceNum;
+
+        const cleanNotes = (p.notes || "").trim();
+        const displayNotes = (cleanNotes === "" || cleanNotes === "-") ? "" : cleanNotes;
+
         return {
           idx: idx + 1,
-          supplier: p.suppliers?.name || "-",
-          invoiceNum: p.invoice_number || "-",
+          supplier: displaySupplier,
+          invoiceNum: displayInvoiceNum,
           date: format(parseISO(p.date), "yyyy/MM/dd", { locale: ar }),
-          notes: p.notes || "-",
+          notes: displayNotes,
           amount: p.total_amount
         };
       });
 
-      const hasSupplier = processedPurchases.some(r => r.supplier !== "-" && r.supplier !== "");
-      const hasInvoiceNum = processedPurchases.some(r => r.invoiceNum !== "-" && r.invoiceNum !== "");
-      const hasNotes = processedPurchases.some(r => r.notes !== "-" && r.notes !== "");
+      const hasSupplier = processedPurchases.some(r => r.supplier !== "");
+      const hasInvoiceNum = processedPurchases.some(r => r.invoiceNum !== "");
+      const hasNotes = processedPurchases.some(r => r.notes !== "");
+
+      // Distribute the remaining 58% width dynamically
+      const varCols = [
+        { key: 'supplier', header: "المورد", defaultWidth: 22, align: "right", active: hasSupplier },
+        { key: 'invoiceNum', header: "رقم الفاتورة", defaultWidth: 16, align: "center", active: hasInvoiceNum },
+        { key: 'notes', header: "الملاحظات", defaultWidth: 20, align: "right", active: hasNotes }
+      ];
+      const activeVar = varCols.filter(c => c.active);
+      const totalVarDefault = activeVar.reduce((sum, c) => sum + c.defaultWidth, 0);
 
       const cols = [
         { header: "#", width: "6%", align: "center", render: (r: any) => `${r.idx}` },
-        ...(hasSupplier ? [{ header: "المورد", width: hasNotes ? "20%" : "auto", align: "right", render: (r: any) => `${r.supplier}` }] : []),
-        ...(hasInvoiceNum ? [{ header: "رقم الفاتورة", width: "15%", align: "center", render: (r: any) => `${r.invoiceNum}` }] : []),
+        ...activeVar.map(c => {
+          const w = totalVarDefault > 0 ? Math.round((c.defaultWidth / totalVarDefault) * 58) : 58;
+          return {
+            header: c.header,
+            width: `${w}%`,
+            align: c.align,
+            render: (r: any) => `${r[c.key] || "-"}`
+          };
+        }),
         { header: "التاريخ", width: "18%", align: "center", render: (r: any) => `${r.date}` },
-        ...(hasNotes ? [{ header: "الملاحظات", width: "auto", align: "right", render: (r: any) => `${r.notes}` }] : []),
         { header: "المبلغ", width: "18%", align: "center", render: (r: any) => `<span style="font-weight: bold;">${formatCurrencyLYD(r.amount)}</span>` }
       ];
 
@@ -810,40 +860,86 @@ const ProjectPhases = () => {
       // Prepare data rows
       const paymentRows = allocations.map((a: any, idx: number) => {
         const p = a.client_payments;
-        const payDate = p?.date ? format(parseISO(p.date), "yyyy/MM/dd", { locale: ar }) : "-";
-        let payMethod = p?.payment_method || "-";
+        const payDate = p?.date ? format(parseISO(p.date), "yyyy/MM/dd", { locale: ar }) : "";
+        const displayDate = (payDate === "" || payDate === "-") ? "" : payDate;
+
+        let payMethod = (p?.payment_method || "").trim();
         if (payMethod === 'cash') payMethod = 'نقداً';
         else if (payMethod === 'bank') payMethod = 'تحويل مصرفي';
         else if (payMethod === 'check') payMethod = 'صك';
+        const displayMethod = (payMethod === "" || payMethod === "-") ? "" : payMethod;
         
-        const treasury = p?.treasuries?.name || "-";
-        const notes = p?.notes || "-";
+        const treasury = (p?.treasuries?.name || "").trim();
+        const displayTreasury = (treasury === "" || treasury === "-") ? "" : treasury;
+
+        const cleanNotes = (p?.notes || "").trim();
+        const displayNotes = (cleanNotes === "" || cleanNotes === "-") ? "" : cleanNotes;
+
+        // تحديد بيان وماهية الفاتورة/البند الموزع عليها
+        let displayReference = "تسوية حسابات";
+        if (a.reference_type === 'item') {
+          const matchedItem = items?.find((it: any) => it.id === a.reference_id);
+          displayReference = matchedItem ? `بند: ${matchedItem.name}` : `بند مشروع`;
+        } else if (a.reference_type === 'purchase') {
+          const matchedPurch = purchases?.find((pu: any) => pu.id === a.reference_id);
+          if (matchedPurch) {
+            displayReference = `فاتورة مشتريات ${matchedPurch.invoice_number || matchedPurch.id.slice(0, 5)}`;
+            if (matchedPurch.suppliers?.name) {
+              displayReference += ` (${matchedPurch.suppliers.name})`;
+            }
+          } else {
+            const matchedRent = rentalPurchases?.find((re: any) => re.id === a.reference_id);
+            if (matchedRent) {
+              displayReference = `إيجار: ${matchedRent.equipment_rentals?.equipment?.name || "معدات"}`;
+            } else {
+              displayReference = `فاتورة مشتريات`;
+            }
+          }
+        } else if (a.reference_type === 'rental') {
+          const matchedRent = rentalPurchases?.find((re: any) => re.id === a.reference_id);
+          displayReference = matchedRent ? `إيجار: ${matchedRent.equipment_rentals?.equipment?.name || "معدات"}` : `إيجار معدات`;
+        }
+
         return {
           idx: idx + 1,
-          date: payDate,
-          method: payMethod,
-          treasury: treasury,
-          notes: notes,
+          date: displayDate,
+          method: displayMethod,
+          treasury: displayTreasury,
+          reference: displayReference,
+          notes: displayNotes,
           amount: a.amount
         };
       });
 
-      // Check if notes column is empty for all rows
-      const hasNotes = paymentRows.some(r => r.notes !== "-" && r.notes !== "");
-      // Check if treasury column is empty for all rows
-      const hasTreasury = paymentRows.some(r => r.treasury !== "-" && r.treasury !== "");
-      // Check if method column is empty for all rows
-      const hasMethod = paymentRows.some(r => r.method !== "-" && r.method !== "");
-      // Check if date column is empty for all rows
-      const hasDate = paymentRows.some(r => r.date !== "-" && r.date !== "");
+      // Check which columns are active
+      const hasDate = paymentRows.some(r => r.date !== "");
+      const hasMethod = paymentRows.some(r => r.method !== "");
+      const hasTreasury = paymentRows.some(r => r.treasury !== "");
+      const hasNotes = paymentRows.some(r => r.notes !== "");
 
-      // Define columns to render based on emptiness
+      // Distribute the remaining 76% width dynamically among active optional columns
+      const varCols = [
+        { key: 'date', header: "التاريخ", defaultWidth: 13, align: "center", active: hasDate },
+        { key: 'method', header: "طريقة الدفع", defaultWidth: 12, align: "center", active: hasMethod },
+        { key: 'treasury', header: "الخزينة", defaultWidth: 14, align: "center", active: hasTreasury },
+        { key: 'reference', header: "البيان / الفاتورة", defaultWidth: 23, align: "right", active: true },
+        { key: 'notes', header: "الملاحظات", defaultWidth: 14, align: "right", active: hasNotes }
+      ];
+      const activeVar = varCols.filter(c => c.active);
+      const totalVarDefault = activeVar.reduce((sum, c) => sum + c.defaultWidth, 0);
+
+      // Define columns dynamically
       const cols = [
         { header: "#", width: "6%", align: "center", render: (r: any) => `${r.idx}` },
-        ...(hasDate ? [{ header: "التاريخ", width: "16%", align: "center", render: (r: any) => `${r.date}` }] : []),
-        ...(hasMethod ? [{ header: "طريقة الدفع", width: "16%", align: "center", render: (r: any) => `${r.method}` }] : []),
-        ...(hasTreasury ? [{ header: "الخزينة", width: hasNotes ? "18%" : "auto", align: "center", render: (r: any) => `${r.treasury}` }] : []),
-        ...(hasNotes ? [{ header: "الملاحظات", width: "auto", align: "right", render: (r: any) => `${r.notes}` }] : []),
+        ...activeVar.map(c => {
+          const w = totalVarDefault > 0 ? Math.round((c.defaultWidth / totalVarDefault) * 76) : 76;
+          return {
+            header: c.header,
+            width: `${w}%`,
+            align: c.align,
+            render: (r: any) => `${r[c.key] || "-"}`
+          };
+        }),
         { header: "المبلغ", width: "18%", align: "center", render: (r: any) => `<span style="font-weight: bold;">${formatCurrencyLYD(r.amount)}</span>` }
       ];
 
@@ -875,8 +971,10 @@ const ProjectPhases = () => {
     }
 
     // ملخص مالي
-    // We already computed these values at the top of the function:
-    // totalItems, clientPaidActual, totalPurch, totalRent, totalExp, totalTech, totalPercentageFee, totalDueFromClient, clientRemaining
+    const remainingLabel = clientRemaining < 0 ? "رصيد دائن للزبون (له)" : clientRemaining === 0 ? "المتبقي على الزبون (مسدد بالكامل)" : "المتبقي على الزبون";
+    const remainingVal = Math.abs(clientRemaining);
+    const remainingColor = clientRemaining > 0 ? '#b91c1c' : '#1a5f1a';
+    const remainingBg = clientRemaining > 0 ? '#ffebee' : '#e8f5e9';
 
     if (isClient) {
       // للزبون: إجمالي البنود + الأقسام المختارة
@@ -917,7 +1015,7 @@ const ProjectPhases = () => {
       // المدفوع والمتبقي
       clientSummaryHTML += `
         <tr style="background-color: #e8f5e9;"><td>المدفوع من الزبون</td><td style="color: #1a5f1a; font-weight: bold;">${formatCurrencyLYD(clientPaidActual)}</td></tr>
-        <tr style="background-color: ${clientRemaining > 0 ? '#ffebee' : '#e8f5e9'};"><td>المتبقي على الزبون</td><td style="color: ${clientRemaining > 0 ? '#b91c1c' : '#1a5f1a'}; font-weight: bold;">${formatCurrencyLYD(clientRemaining)}</td></tr>
+        <tr style="background-color: ${remainingBg};"><td>${remainingLabel}</td><td style="color: ${remainingColor}; font-weight: bold;">${formatCurrencyLYD(remainingVal)}</td></tr>
       `;
       if (options?.showPurchases || options?.showRentals || options?.showExpenses) {
         clientSummaryHTML += `</tbody><tfoot><tr><td>الإجمالي الكلي</td><td>${formatCurrencyLYD(clientTotal)}</td></tr></tfoot>`;
@@ -952,7 +1050,7 @@ const ProjectPhases = () => {
               <tr><td>إجمالي المصروفات</td><td>${formatCurrencyLYD(totalExp)}</td></tr>
               <tr><td>تكاليف العمالة</td><td>${formatCurrencyLYD(totalTech)}</td></tr>
               <tr style="background-color: #e8f5e9;"><td>المدفوع من الزبون</td><td style="color: #1a5f1a; font-weight: bold;">${formatCurrencyLYD(clientPaidActual)}</td></tr>
-              <tr style="background-color: ${clientRemaining > 0 ? '#ffebee' : '#e8f5e9'};"><td>المتبقي على الزبون</td><td style="color: ${clientRemaining > 0 ? '#b91c1c' : '#1a5f1a'}; font-weight: bold;">${formatCurrencyLYD(clientRemaining)}</td></tr>
+              <tr style="background-color: ${remainingBg};"><td>${remainingLabel}</td><td style="color: ${remainingColor}; font-weight: bold;">${formatCurrencyLYD(remainingVal)}</td></tr>
             </tbody>
             <tfoot>
               <tr>

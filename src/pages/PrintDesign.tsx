@@ -344,6 +344,10 @@ const PrintDesign = () => {
   };
 
   const handlePasteLogo = async () => {
+    if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
+      toast.error("لصق الصور برمجياً غير مدعوم في هذا الاتصال. يرجى تشغيل النظام على HTTPS أو localhost، أو رفع الصورة يدوياً.");
+      return;
+    }
     try {
       const clipboardItems = await navigator.clipboard.read();
       for (const item of clipboardItems) {
@@ -383,6 +387,10 @@ const PrintDesign = () => {
   };
 
   const handlePasteBg = async () => {
+    if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
+      toast.error("لصق الصور برمجياً غير مدعوم في هذا الاتصال. يرجى تشغيل النظام على HTTPS أو localhost، أو رفع الصورة يدوياً.");
+      return;
+    }
     try {
       const clipboardItems = await navigator.clipboard.read();
       for (const item of clipboardItems) {
@@ -2251,7 +2259,7 @@ const PrintDesign = () => {
                     </div>
                   </div>
 
-                  {/* Footer */}
+                  {/* Footer — positioned just above the bottom padding, mirroring print fixed footer at bottom:0 */}
                   {footerEnabled && (
                     <div
                       style={{
@@ -2260,37 +2268,32 @@ const PrintDesign = () => {
                         left: 0,
                         right: 0,
                         height: `${footerHeight}mm`,
-                        paddingBottom: 0,
                         paddingLeft: `${padLeft}mm`,
                         paddingRight: `${padRight}mm`,
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'space-between',
+                        justifyContent: 'flex-start',
                         borderTop: `1px solid ${tableBorderColor || '#ccc'}`,
                         fontSize: `${scaledFooterFontSize}px`,
                         color: '#555',
                         direction: 'rtl',
+                        backgroundColor: 'white',
+                        overflow: 'hidden',
+                        gap: '12px',
                       }}
                     >
-                      <div className="flex gap-4 text-right items-center">
-                        {companyPhone && (
-                          <span className="flex items-center gap-1">
-                            <Phone size={12} style={{ color: footerIconColor }} /> هاتف: {companyPhone}
-                          </span>
-                        )}
-                        {companyAddress && (
-                          <span className="flex items-center gap-1">
-                            <MapPin size={12} style={{ color: footerIconColor }} /> العنوان: {companyAddress}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{
-                        fontSize: `${Math.max(10, scaledFooterFontSize - 2)}px`,
-                        color: '#555',
-                        whiteSpace: 'nowrap',
-                      }}>
-                        صفحة 1 من 1
-                      </div>
+                      {companyPhone && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
+                          <Phone size={11} style={{ color: footerIconColor, flexShrink: 0 }} />
+                          <span>{companyPhone}</span>
+                        </span>
+                      )}
+                      {companyAddress && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
+                          <MapPin size={11} style={{ color: footerIconColor, flexShrink: 0 }} />
+                          <span>{companyAddress}</span>
+                        </span>
+                      )}
                     </div>
                   )}
                 </>

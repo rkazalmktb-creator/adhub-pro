@@ -296,7 +296,7 @@ const ProjectPayments = () => {
             id: item.id, type: "item",
             description: `بند: ${item.name}`,
             total_amount: Number(item.total_price), paid_amount: totalAllocated, remaining,
-            service_fee: pct > 0 ? remaining * pct / 100 : 0, service_fee_percentage: pct,
+            service_fee: 0, service_fee_percentage: 0,
             phase_id: item.phase_id, phase_name: phase?.name || null,
             phase_treasury_id: phase?.treasury_id || null,
             source_treasury_id: phase?.treasury_id || null,
@@ -545,37 +545,73 @@ const ProjectPayments = () => {
         </div>
 
         <!-- Allocations list if available -->
-        ${paymentAllocs.length > 0 ? `
-        <div class="print-section" style="margin-bottom: 25px;">
-          <div class="print-section-title" style="font-weight: bold; font-size: 12pt; color: ${companySettings?.print_section_title_color || '#7A5A10'}; border-bottom: 1.5px solid ${companySettings?.print_section_title_color || '#7A5A10'}; padding-bottom: 4px; margin-bottom: 8px;">تفاصيل تسوية وتوزيع الدفعة</div>
-          <table class="print-table" style="width: 100%; border-collapse: collapse; text-align: right; ${borderStyle}">
-            <thead>
-              <tr style="background-color: ${companySettings?.print_table_header_color || '#B4A078'}; color: ${companySettings?.print_header_text_color || '#ffffff'};">
-                <th style="width: 30%; padding: 8px; ${borderStyle} text-align: right;">نوع الفاتورة / البند</th>
-                <th style="width: 25%; padding: 8px; ${borderStyle} text-align: center;">رقم المرجع / التفاصيل</th>
-                <th style="width: 25%; padding: 8px; ${borderStyle} text-align: right;">المرحلة</th>
-                <th style="width: 20%; padding: 8px; ${borderStyle} text-align: left;">المبلغ المستقطع</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${paymentAllocs.map(alloc => {
-                const purchase = allocPurchases?.find(p => p.id === alloc.reference_id);
-                const phase = phases?.find(p => p.id === alloc.phase_id);
-                const desc = alloc.reference_type === 'purchase' ? 'مشتريات' : alloc.reference_type === 'rental' ? 'إيجار معدات' : 'بند مقاولات';
-                const refNum = purchase?.invoice_number ? `فاتورة رقم ${purchase.invoice_number}` : '-';
-                return `
+        ${(() => {
+          if (!paymentAllocs || paymentAllocs.length === 0) return '';
+          
+          const processedAllocs = paymentAllocs.map(alloc => {
+            const purchase = allocPurchases?.find(p => p.id === alloc.reference_id);
+            const phase = phases?.find(p => p.id === alloc.phase_id);
+            const desc = alloc.reference_type === 'purchase' ? 'مشتريات' : alloc.reference_type === 'rental' ? 'إيجار معدات' : 'بند مقاولات';
+            
+            const cleanRefNum = purchase?.invoice_number ? `فاتورة رقم ${purchase.invoice_number}` : '';
+            const displayRefNum = (cleanRefNum === "" || cleanRefNum === "-") ? "" : cleanRefNum;
+
+            const cleanPhaseName = (phase?.name || "").trim();
+            const displayPhaseName = (cleanPhaseName === "" || cleanPhaseName === "-") ? "" : cleanPhaseName;
+
+            return {
+              desc,
+              refNum: displayRefNum,
+              phaseName: displayPhaseName,
+              amount: Number(alloc.amount)
+            };
+          });
+
+          const hasRefNum = processedAllocs.some(r => r.refNum !== "");
+          const hasPhase = processedAllocs.some(r => r.phaseName !== "");
+
+          // Distribute remaining width dynamically (Fixed: Amount = 20%, Type = 30%. Remaining = 50%)
+          const varCols = [
+            { key: 'refNum', header: "رقم المرجع / التفاصيل", defaultWidth: 25, align: "center", active: hasRefNum },
+            { key: 'phaseName', header: "المرحلة", defaultWidth: 25, align: "right", active: hasPhase }
+          ];
+          const activeVar = varCols.filter(c => c.active);
+          const totalVarDefault = activeVar.reduce((sum, c) => sum + c.defaultWidth, 0);
+
+          const cols = [
+            { header: "نوع الفاتورة / البند", width: activeVar.length > 0 ? "30%" : "80%", align: "right", render: (r: any) => `${r.desc}` },
+            ...activeVar.map(c => {
+              const w = totalVarDefault > 0 ? Math.round((c.defaultWidth / totalVarDefault) * 50) : 50;
+              return {
+                header: c.header,
+                width: `${w}%`,
+                align: c.align,
+                render: (r: any) => `${r[c.key] || "-"}`
+              };
+            }),
+            { header: "المبلغ المستقطع", width: "20%", align: "left", render: (r: any) => `<span style="font-weight: bold;">${formatCurrencyLYD(r.amount)}</span>` }
+          ];
+
+          return `
+          <div class="print-section" style="margin-bottom: 25px;">
+            <div class="print-section-title" style="font-weight: bold; font-size: 12pt; color: ${companySettings?.print_section_title_color || '#7A5A10'}; border-bottom: 1.5px solid ${companySettings?.print_section_title_color || '#7A5A10'}; padding-bottom: 4px; margin-bottom: 8px;">تفاصيل تسوية وتوزيع الدفعة</div>
+            <table class="print-table" style="width: 100%; border-collapse: collapse; text-align: right; ${borderStyle}">
+              <thead>
+                <tr style="background-color: ${companySettings?.print_table_header_color || '#B4A078'}; color: ${companySettings?.print_header_text_color || '#ffffff'};">
+                  ${cols.map(c => `<th style="width: ${c.width}; padding: 8px; ${borderStyle} text-align: ${c.align === 'left' ? 'left' : c.align === 'right' ? 'right' : 'center'};">${c.header}</th>`).join("")}
+                </tr>
+              </thead>
+              <tbody>
+                ${processedAllocs.map(r => `
                   <tr>
-                    <td style="padding: 8px; ${borderStyle}">${desc}</td>
-                    <td style="padding: 8px; ${borderStyle} text-align: center;">${refNum}</td>
-                    <td style="padding: 8px; ${borderStyle}">${phase?.name || 'بدون مرحلة'}</td>
-                    <td style="padding: 8px; ${borderStyle} text-align: left; font-weight: bold;">${formatCurrencyLYD(Number(alloc.amount))}</td>
+                    ${cols.map(c => `<td style="padding: 8px; ${borderStyle} text-align: ${c.align === 'left' ? 'left' : c.align === 'right' ? 'right' : 'center'};">${c.render(r)}</td>`).join("")}
                   </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-        ` : ''}
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+          `;
+        })()}
 
         <!-- Signatures -->
         <div style="margin-top: 60px; display: flex; justify-content: space-between; padding: 0 40px;">

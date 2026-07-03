@@ -567,27 +567,36 @@ const TechnicianDetail = () => {
               </table>
             </div>
 
-            <div class="print-section">
-              <h3 class="print-section-title">تفاصيل الإنجاز</h3>
-              <table class="print-table">
-                <thead>
-                  <tr>
-                    <th>الكمية المنجزة</th>
-                    <th>السعر</th>
-                    <th>المستحق</th>
-                    <th>ملاحظات</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style="text-align: center">${Number(record.quantity_completed).toLocaleString()} ${unit}</td>
-                    <td style="text-align: center">${formatCurrencyLYD(rate)}</td>
-                    <td style="text-align: center; font-weight: bold">${formatCurrencyLYD(deservedAmount)}</td>
-                    <td style="text-align: center">${record.notes || "-"}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+              ${(() => {
+                const cleanNotes = (record.notes || "").trim();
+                const displayNotes = (cleanNotes === "" || cleanNotes === "-") ? "" : cleanNotes;
+                const hasNotes = displayNotes !== "";
+
+                const cols = [
+                  { header: "الكمية المنجزة", width: hasNotes ? "25%" : "33.33%", align: "center", render: () => `${Number(record.quantity_completed).toLocaleString()} ${unit}` },
+                  { header: "السعر", width: hasNotes ? "25%" : "33.33%", align: "center", render: () => `${formatCurrencyLYD(rate)}` },
+                  { header: "المستحق", width: hasNotes ? "25%" : "33.33%", align: "center", render: () => `<span style="font-weight: bold">${formatCurrencyLYD(deservedAmount)}</span>` },
+                  ...(hasNotes ? [{ header: "ملاحظات", width: "25%", align: "center", render: () => `${displayNotes}` }] : [])
+                ];
+
+                return `
+                <div class="print-section">
+                  <h3 class="print-section-title">تفاصيل الإنجاز</h3>
+                  <table class="print-table">
+                    <thead>
+                      <tr>
+                        ${cols.map(c => `<th style="width: ${c.width}; text-align: center;">${c.header}</th>`).join("")}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        ${cols.map(c => `<td style="text-align: center;">${c.render()}</td>`).join("")}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                `;
+              })()}
 
             <div class="total-box">
               <div class="label">إجمالي المستحق</div>

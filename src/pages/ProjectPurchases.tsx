@@ -679,36 +679,69 @@ const ProjectPurchases = () => {
 
           <div class="print-section">
             <h3 class="print-section-title">${pl.items_section}</h3>
-            <table class="print-table">
-              <thead>
-                <tr>
-                  <th style="width: 50px">${pl.col_number}</th>
-                  <th>${pl.col_item}</th>
-                  <th style="width: 80px">${pl.col_unit}</th>
-                  <th style="width: 100px">${pl.col_quantity}</th>
-                  <th style="width: 120px">${pl.col_price}</th>
-                  <th style="width: 140px">${pl.col_total}</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${items.map((item: PurchaseItem, idx: number) => `
+            ${(() => {
+              const processedItems = items.map((item: PurchaseItem, idx: number) => {
+                const cleanUnit = (item.unit || "").trim();
+                const displayUnit = (cleanUnit === "" || cleanUnit === "-") ? "" : cleanUnit;
+                return {
+                  idx: idx + 1,
+                  name: item.name || "",
+                  unit: displayUnit,
+                  qty: item.qty,
+                  price: item.price,
+                  total: item.qty * item.price
+                };
+              });
+
+              const hasUnit = processedItems.some(r => r.unit !== "");
+
+              // Distribute remaining 48% width dynamically between Item Name and Unit
+              const varCols = [
+                { key: 'name', header: pl.col_item, defaultWidth: 28, align: "right", active: true },
+                { key: 'unit', header: pl.col_unit, defaultWidth: 20, align: "center", active: hasUnit }
+              ];
+              const activeVar = varCols.filter(c => c.active);
+              const totalVarDefault = activeVar.reduce((sum, c) => sum + c.defaultWidth, 0);
+
+              const cols = [
+                { header: pl.col_number, width: "6%", align: "center", render: (r: any) => `${r.idx}` },
+                ...activeVar.map(c => {
+                  const w = totalVarDefault > 0 ? Math.round((c.defaultWidth / totalVarDefault) * 48) : 48;
+                  return {
+                    header: c.header,
+                    width: `${w}%`,
+                    align: c.align,
+                    render: (r: any) => `${r[c.key] || "-"}`
+                  };
+                }),
+                { header: pl.col_quantity, width: "12%", align: "center", render: (r: any) => `${r.qty}` },
+                { header: pl.col_price, width: "16%", align: "center", render: (r: any) => `${formatCurrencyLYD(r.price)}` },
+                { header: pl.col_total, width: "18%", align: "center", render: (r: any) => `<span style="font-weight: bold">${formatCurrencyLYD(r.total)}</span>` }
+              ];
+
+              return `
+              <table class="print-table">
+                <thead>
                   <tr>
-                    <td style="text-align: center">${idx + 1}</td>
-                    <td style="text-align: center">${item.name}</td>
-                    <td style="text-align: center">${item.unit || "-"}</td>
-                    <td style="text-align: center">${item.qty}</td>
-                    <td style="text-align: center">${formatCurrencyLYD(item.price)}</td>
-                    <td style="text-align: center; font-weight: bold">${formatCurrencyLYD(item.qty * item.price)}</td>
+                    ${cols.map(c => `<th style="width: ${c.width}; text-align: ${c.align === 'right' ? 'right' : 'center'};">${c.header}</th>`).join("")}
                   </tr>
-                `).join("")}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td colspan="5" style="text-align: center; font-weight: bold">${pl.total_label}</td>
-                  <td style="text-align: center; font-weight: bold">${formatCurrencyLYD(purchase.total_amount)}</td>
-                </tr>
-              </tfoot>
-            </table>
+                </thead>
+                <tbody>
+                  ${processedItems.map(r => `
+                    <tr>
+                      ${cols.map(c => `<td style="text-align: ${c.align === 'right' ? 'right' : 'center'};">${c.render(r)}</td>`).join("")}
+                    </tr>
+                  `).join("")}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colspan="${cols.length - 1}" style="text-align: center; font-weight: bold">${pl.total_label}</td>
+                    <td style="text-align: center; font-weight: bold">${formatCurrencyLYD(purchase.total_amount)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+              `;
+            })()}
           </div>
 
           ${purchase.notes && pl.show_notes ? `

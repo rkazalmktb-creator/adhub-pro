@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -120,8 +120,8 @@ export default function PaymentAllocationDialog({
   const [bulkAmount, setBulkAmount] = useState("");
 
   // Initialize allocations when dialog opens
-  const handleOpenChange = useCallback((isOpen: boolean) => {
-    if (isOpen && invoices.length > 0) {
+  useEffect(() => {
+    if (open && invoices) {
       setAllocations(invoices.map(inv => ({ invoice: inv, amount: 0, selected: false })));
       setBulkAmount("");
       setFormData({
@@ -130,8 +130,11 @@ export default function PaymentAllocationDialog({
         notes: "",
       });
     }
+  }, [open, invoices]);
+
+  const handleOpenChange = (isOpen: boolean) => {
     if (!isOpen) onClose();
-  }, [invoices, onClose]);
+  };
 
   // Computed values
   const stats = useMemo(() => {
