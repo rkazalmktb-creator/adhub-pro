@@ -1,0 +1,16 @@
+project_id = "bpnhzaexmqruzaxyzlyc"
+
+[functions.update-password]
+verify_jwt = false
+
+[functions.update-user]
+verify_jwt = false
+
+[functions.create-admin]
+verify_jwt = false
+
+[functions.create-user]
+verify_jwt = false
+
+[functions.resolve-username]
+verify_jwt = false
