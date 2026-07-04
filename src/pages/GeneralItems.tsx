@@ -21,19 +21,17 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Ruler, Square, Box, Package, Filter, Calculator, Settings } from "lucide-react";
+import {
+  Plus, Pencil, Trash2, Ruler, Square, Box, Package,
+  Calculator, Settings, Search, X, ChevronDown, ChevronUp,
+  Layers, Tag, Hash,
+} from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
+/* ─── Types ──────────────────────────────────────────────────── */
 type MeasurementType = "linear" | "square" | "cubic";
 
 interface GeneralItem {
@@ -66,6 +64,7 @@ interface MeasurementConfig {
   is_default: boolean;
 }
 
+/* ─── Constants ──────────────────────────────────────────────── */
 const measurementLabels: Record<MeasurementType, string> = {
   linear: "متر طولي",
   square: "متر مربع",
@@ -73,66 +72,70 @@ const measurementLabels: Record<MeasurementType, string> = {
 };
 
 const measurementIcons: Record<MeasurementType, React.ReactNode> = {
-  linear: <Ruler className="h-4 w-4" />,
-  square: <Square className="h-4 w-4" />,
-  cubic: <Box className="h-4 w-4" />,
+  linear: <Ruler className="h-3.5 w-3.5" />,
+  square: <Square className="h-3.5 w-3.5" />,
+  cubic:  <Box  className="h-3.5 w-3.5" />,
+};
+
+const measurementColors: Record<MeasurementType, string> = {
+  linear: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  square: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
+  cubic:  "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
 };
 
 const defaultCategories = [
-  "أعمدة",
-  "جدران",
-  "أسقف",
-  "أرضيات",
-  "أساسات",
-  "سلالم",
-  "أعمال تشطيب",
-  "أعمال كهربائية",
-  "أعمال صحية",
-  "أخرى",
+  "أعمدة", "جدران", "أسقف", "أرضيات", "أساسات",
+  "سلالم", "أعمال تشطيب", "أعمال كهربائية", "أعمال صحية", "أخرى",
 ];
 
+const emptyForm = {
+  name: "",
+  description: "",
+  measurement_type: "linear" as MeasurementType,
+  default_unit_price: "",
+  category: "",
+  formula: "",
+  notes: "",
+  measurement_config_id: "",
+  component_values: {} as Record<string, string>,
+  measurement_factor: "1",
+};
+
+/* ─── Component ──────────────────────────────────────────────── */
 const GeneralItems = () => {
   const queryClient = useQueryClient();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<GeneralItem | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [formData, setFormData] = useState({
-    name: "",
-    description: "",
-    measurement_type: "linear" as MeasurementType,
-    default_unit_price: "",
-    category: "",
-    formula: "",
-    notes: "",
-    measurement_config_id: "",
-    component_values: {} as Record<string, string>,
-    measurement_factor: "1",
-  });
 
-  // Fetch general items
-  const { data: items, isLoading } = useQuery({
+  const [dialogOpen, setDialogOpen]     = useState(false);
+  const [deleteOpen, setDeleteOpen]     = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<GeneralItem | null>(null);
+  const [editingItem, setEditingItem]   = useState<GeneralItem | null>(null);
+  const [searchQuery, setSearchQuery]   = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [formData, setFormData]         = useState(emptyForm);
+
+  /* ── Data ──────────────────────────────────────────────────── */
+  const { data: items = [], isLoading } = useQuery({
     queryKey: ["general-items"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("general_project_items")
         .select("*")
         .order("category", { ascending: true })
-        .order("name", { ascending: true });
+        .order("name",     { ascending: true });
       if (error) throw error;
       return data as GeneralItem[];
     },
   });
 
-  // Fetch measurement configs
-  const { data: measurementConfigs } = useQuery({
+  const { data: measurementConfigs = [] } = useQuery({
     queryKey: ["measurement-configs"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("measurement_configs")
         .select("*")
         .order("is_default", { ascending: false })
-        .order("name", { ascending: true });
+        .order("name",       { ascending: true });
       if (error) throw error;
       return (data || []).map((item) => ({
         ...item,
@@ -141,120 +144,101 @@ const GeneralItems = () => {
     },
   });
 
-  // Get unique categories from items
-  const existingCategories = [...new Set(items?.map(item => item.category).filter(Boolean) || [])];
-  const allCategories = [...new Set([...defaultCategories, ...existingCategories])];
+  /* ── Derived ───────────────────────────────────────────────── */
+  const existingCategories = [...new Set(items.map((i) => i.category).filter(Boolean) as string[])];
+  const allCategories      = [...new Set([...defaultCategories, ...existingCategories])];
 
-  // Get selected measurement config
   const selectedMeasurementConfig = useMemo(() => {
-    if (!formData.measurement_config_id || !measurementConfigs) return null;
-    return measurementConfigs.find(c => c.id === formData.measurement_config_id) || null;
+    if (!formData.measurement_config_id) return null;
+    return measurementConfigs.find((c) => c.id === formData.measurement_config_id) || null;
   }, [formData.measurement_config_id, measurementConfigs]);
 
-  // Calculate quantity based on formula and component values
   const calculatedQuantity = useMemo(() => {
     if (!selectedMeasurementConfig?.formula) return null;
-    
     try {
       let formula = selectedMeasurementConfig.formula;
       const factor = parseFloat(formData.measurement_factor) || 1;
-      
-      // Check if all components have values
-      let hasAllValues = true;
-      selectedMeasurementConfig.components.forEach(comp => {
-        const value = parseFloat(formData.component_values[comp.symbol]);
-        if (isNaN(value) || value === 0) hasAllValues = false;
-        const regex = new RegExp(comp.symbol, 'g');
-        formula = formula.replace(regex, (value || 0).toString());
+      let hasAll = true;
+      selectedMeasurementConfig.components.forEach((comp) => {
+        const val = parseFloat(formData.component_values[comp.symbol]);
+        if (isNaN(val) || val === 0) hasAll = false;
+        formula = formula.replace(new RegExp(comp.symbol, "g"), (val || 0).toString());
       });
-      
-      if (!hasAllValues) return null;
-      
-      // Evaluate the formula
+      if (!hasAll) return null;
       const result = safeEvaluate(formula);
-      if (result === null) return null;
-      
-      return result * factor;
-    } catch {
-      return null;
-    }
+      return result === null ? null : result * factor;
+    } catch { return null; }
   }, [selectedMeasurementConfig, formData.component_values, formData.measurement_factor]);
 
-  // Calculate formula example with fixed value of 10 - uses measurement config symbols
   const formulaExample = useMemo(() => {
     if (!formData.formula) return null;
-    
     try {
-      const exampleValue = 10;
-      const price = parseFloat(formData.default_unit_price) || exampleValue;
-      
+      const ex    = 10;
+      const price = parseFloat(formData.default_unit_price) || ex;
       let formula = formData.formula;
-      const values: Record<string, number> = {};
-      
-      // First, replace measurement config component symbols if available
-      if (selectedMeasurementConfig && selectedMeasurementConfig.components.length > 0) {
-        selectedMeasurementConfig.components.forEach(comp => {
-          const regex = new RegExp(comp.symbol, 'g');
-          formula = formula.replace(regex, exampleValue.toString());
-          values[comp.symbol] = exampleValue;
+      const vals: Record<string, number> = {};
+      if (selectedMeasurementConfig?.components.length) {
+        selectedMeasurementConfig.components.forEach((c) => {
+          formula = formula.replace(new RegExp(c.symbol, "g"), ex.toString());
+          vals[c.symbol] = ex;
         });
       }
-      
-      // Also replace common Arabic/English variables
       formula = formula
         .replace(/السعر|price/gi, price.toString())
-        .replace(/الكمية|qty/gi, exampleValue.toString())
-        .replace(/الطول|length/gi, exampleValue.toString())
-        .replace(/العرض|width/gi, exampleValue.toString())
-        .replace(/الارتفاع|height/gi, exampleValue.toString());
-      
-      // Add common variables to values display
-      values['السعر'] = price;
-      
+        .replace(/الكمية|qty/gi, ex.toString())
+        .replace(/الطول|length/gi, ex.toString())
+        .replace(/العرض|width/gi, ex.toString())
+        .replace(/الارتفاع|height/gi, ex.toString());
+      vals["السعر"] = price;
       const result = safeEvaluate(formula);
       if (result === null) return null;
-      
-      return {
-        result,
-        values,
-        hasConfigSymbols: selectedMeasurementConfig && selectedMeasurementConfig.components.length > 0,
-      };
-    } catch {
-      return null;
-    }
+      return { result, vals };
+    } catch { return null; }
   }, [formData.formula, formData.default_unit_price, selectedMeasurementConfig]);
 
-  // Add/Update mutation
+  const filteredItems = useMemo(() =>
+    items.filter((item) => {
+      const q = searchQuery.toLowerCase();
+      const matchSearch = !q ||
+        item.name.toLowerCase().includes(q) ||
+        (item.description || "").toLowerCase().includes(q) ||
+        (item.category || "").toLowerCase().includes(q);
+      const matchCat = categoryFilter === "all" || item.category === categoryFilter;
+      return matchSearch && matchCat;
+    }), [items, searchQuery, categoryFilter]);
+
+  const groupedItems = useMemo(() =>
+    filteredItems.reduce((acc, item) => {
+      const cat = item.category || "بدون تصنيف";
+      (acc[cat] = acc[cat] || []).push(item);
+      return acc;
+    }, {} as Record<string, GeneralItem[]>),
+  [filteredItems]);
+
+  /* ── Stats ─────────────────────────────────────────────────── */
+  const categoriesCount = Object.keys(groupedItems).length;
+
+  /* ── Mutations ─────────────────────────────────────────────── */
   const saveMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      // Determine measurement type from selected config or default to linear
       let measurementType: MeasurementType = "linear";
       if (selectedMeasurementConfig) {
-        // Infer measurement type from unit symbol
-        const symbol = selectedMeasurementConfig.unit_symbol.toLowerCase();
-        if (symbol.includes("³") || symbol.includes("م³") || symbol.includes("مكعب")) {
-          measurementType = "cubic";
-        } else if (symbol.includes("²") || symbol.includes("م²") || symbol.includes("مربع")) {
-          measurementType = "square";
-        }
+        const sym = selectedMeasurementConfig.unit_symbol.toLowerCase();
+        if (sym.includes("³") || sym.includes("مكعب")) measurementType = "cubic";
+        else if (sym.includes("²") || sym.includes("مربع")) measurementType = "square";
       }
-
       const payload = {
-        name: data.name,
-        description: data.description || null,
-        measurement_type: measurementType,
+        name:               data.name,
+        description:        data.description || null,
+        measurement_type:   measurementType,
         default_unit_price: parseFloat(data.default_unit_price) || 0,
-        category: data.category || null,
-        formula: data.formula || null,
-        notes: data.notes || null,
+        category:           data.category || null,
+        formula:            data.formula || null,
+        notes:              data.notes || null,
         measurement_config_id: data.measurement_config_id || null,
       };
-
       if (editingItem) {
-        const { error } = await supabase
-          .from("general_project_items")
-          .update(payload)
-          .eq("id", editingItem.id);
+        const { error } = await supabase.from("general_project_items").update(payload).eq("id", editingItem.id);
         if (error) throw error;
       } else {
         const { error } = await supabase.from("general_project_items").insert(payload);
@@ -263,487 +247,640 @@ const GeneralItems = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["general-items"] });
-      toast({
-        title: editingItem ? "تم تحديث العنصر" : "تم إضافة العنصر",
-        description: editingItem
-          ? "تم تحديث بيانات العنصر العام بنجاح"
-          : "تم إضافة العنصر العام بنجاح",
-      });
-      handleCloseDialog();
+      toast({ title: editingItem ? "تم تحديث البند" : "تم إضافة البند", description: editingItem ? "تم تحديث البند العام بنجاح" : "تم إضافة البند العام بنجاح" });
+      closeDialog();
     },
-    onError: () => {
-      toast({
-        title: "خطأ",
-        description: "حدث خطأ أثناء حفظ العنصر",
-        variant: "destructive",
-      });
-    },
+    onError: () => toast({ title: "خطأ", description: "حدث خطأ أثناء حفظ البند", variant: "destructive" }),
   });
 
-  // Delete mutation
   const deleteMutation = useMutation({
-    mutationFn: async (itemId: string) => {
-      const { error } = await supabase
-        .from("general_project_items")
-        .delete()
-        .eq("id", itemId);
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("general_project_items").delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["general-items"] });
-      toast({
-        title: "تم حذف العنصر",
-        description: "تم حذف العنصر العام بنجاح",
-      });
+      toast({ title: "تم حذف البند" });
+      setDeleteOpen(false);
+      setDeleteTarget(null);
     },
-    onError: () => {
-      toast({
-        title: "خطأ",
-        description: "حدث خطأ أثناء حذف العنصر",
-        variant: "destructive",
-      });
-    },
+    onError: () => toast({ title: "خطأ", description: "حدث خطأ أثناء الحذف", variant: "destructive" }),
   });
 
-  const handleCloseDialog = () => {
+  /* ── Handlers ──────────────────────────────────────────────── */
+  const closeDialog = () => {
     setDialogOpen(false);
     setEditingItem(null);
-    setFormData({
-      name: "",
-      description: "",
-      measurement_type: "linear",
-      default_unit_price: "",
-      category: "",
-      formula: "",
-      notes: "",
-      measurement_config_id: "",
-      component_values: {},
-      measurement_factor: "1",
-    });
+    setFormData(emptyForm);
   };
 
-  const handleEdit = (item: GeneralItem) => {
+  const openNew = () => {
+    setEditingItem(null);
+    setFormData(emptyForm);
+    setDialogOpen(true);
+  };
+
+  const openEdit = (item: GeneralItem) => {
     setEditingItem(item);
     setFormData({
-      name: item.name,
-      description: item.description || "",
-      measurement_type: item.measurement_type,
+      name:               item.name,
+      description:        item.description || "",
+      measurement_type:   item.measurement_type,
       default_unit_price: item.default_unit_price.toString(),
-      category: item.category || "",
-      formula: item.formula || "",
-      notes: item.notes || "",
+      category:           item.category || "",
+      formula:            item.formula || "",
+      notes:              item.notes || "",
       measurement_config_id: item.measurement_config_id || "",
-      component_values: {},
+      component_values:   {},
       measurement_factor: "1",
     });
     setDialogOpen(true);
   };
 
+  const confirmDelete = (item: GeneralItem) => {
+    setDeleteTarget(item);
+    setDeleteOpen(true);
+  };
+
+  const toggleGroup = (cat: string) =>
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      next.has(cat) ? next.delete(cat) : next.add(cat);
+      return next;
+    });
+
   const handleSubmit = () => {
     if (!formData.name.trim()) {
-      toast({
-        title: "خطأ",
-        description: "يرجى إدخال اسم العنصر",
-        variant: "destructive",
-      });
+      toast({ title: "خطأ", description: "يرجى إدخال اسم البند", variant: "destructive" });
       return;
     }
     saveMutation.mutate(formData);
   };
 
-  const filteredItems = items?.filter((item) => {
-    const matchesSearch =
-      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.description?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory =
-      categoryFilter === "all" || item.category === categoryFilter;
-    return matchesSearch && matchesCategory;
-  });
-
-  // Group items by category
-  const groupedItems = filteredItems?.reduce((acc, item) => {
-    const category = item.category || "بدون تصنيف";
-    if (!acc[category]) {
-      acc[category] = [];
-    }
-    acc[category].push(item);
-    return acc;
-  }, {} as Record<string, GeneralItem[]>);
-
+  /* ── Loading ───────────────────────────────────────────────── */
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-primary border-t-transparent" />
+          <span className="text-sm text-muted-foreground">جارٍ تحميل البنود...</span>
+        </div>
       </div>
     );
   }
 
+  /* ── Render ────────────────────────────────────────────────── */
   return (
     <div className="space-y-6" dir="rtl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">البنود العامة</h1>
-          <p className="text-muted-foreground">البنود المتكررة التي يمكن استخدامها في المشاريع</p>
+
+      {/* ── Header ───────────────────────────────────────────── */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <Package className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">البنود العامة</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              البنود المتكررة التي يمكن استخدامها في المشاريع
+            </p>
+          </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Link to="/measurement-types">
-            <Button variant="outline">
-              <Settings className="h-4 w-4 ml-2" />
+            <Button variant="outline" className="gap-2 cursor-pointer">
+              <Settings className="h-4 w-4" />
               أنواع القياس
             </Button>
           </Link>
-          <Button onClick={() => setDialogOpen(true)}>
-            <Plus className="h-4 w-4 ml-2" />
-            إضافة بند عام
+          <Button onClick={openNew} className="gap-2 cursor-pointer">
+            <Plus className="h-4 w-4" />
+            إضافة بند
           </Button>
         </div>
       </div>
 
-      {/* Search and Filter */}
-      <div className="flex gap-4 flex-wrap">
-        <Input
-          placeholder="بحث في البنود..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="max-w-sm"
-        />
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-[200px]">
-            <Filter className="h-4 w-4 ml-2" />
-            <SelectValue placeholder="جميع التصنيفات" />
+      {/* ── Stats ────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { icon: Hash,   label: "إجمالي البنود",  value: items.length,      color: "bg-primary/10 text-primary" },
+          { icon: Tag,    label: "التصنيفات",       value: categoriesCount,   color: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
+          { icon: Ruler,  label: "طولية",           value: items.filter(i => i.measurement_type === "linear").length, color: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
+          { icon: Square, label: "مساحية/حجمية",   value: items.filter(i => i.measurement_type !== "linear").length, color: "bg-purple-500/10 text-purple-600 dark:text-purple-400" },
+        ].map(({ icon: Icon, label, value, color }) => (
+          <Card key={label} className="p-4 border-border/60">
+            <div className="flex items-center gap-2.5">
+              <div className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${color}`}>
+                <Icon className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-xl font-bold text-foreground leading-none">{value}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* ── Search + Filter ───────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        {/* Search */}
+        <div className="relative flex-1">
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            placeholder="البحث في البنود..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pr-9"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        {/* Category filter */}
+        <Select value={categoryFilter} onValueChange={setCategoryFilter} dir="rtl">
+          <SelectTrigger className="w-full sm:w-52">
+            <div className="flex items-center gap-2">
+              <Layers className="h-4 w-4 text-muted-foreground" />
+              <SelectValue placeholder="جميع التصنيفات" />
+            </div>
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent dir="rtl">
             <SelectItem value="all">جميع التصنيفات</SelectItem>
             {allCategories.map((cat) => (
-              <SelectItem key={cat} value={cat as string}>
+              <SelectItem key={cat} value={cat}>
                 {cat}
+                <span className="mr-auto text-xs text-muted-foreground">
+                  ({items.filter((i) => i.category === cat).length})
+                </span>
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
 
-      {/* Items by Category */}
-      {groupedItems && Object.keys(groupedItems).length > 0 ? (
-        Object.entries(groupedItems).map(([category, categoryItems]) => (
-          <Card key={category}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Package className="h-5 w-5" />
-                {category} ({categoryItems.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="text-right">البند</TableHead>
-                    <TableHead className="text-right">نوع القياس</TableHead>
-                    <TableHead className="text-right">السعر الافتراضي</TableHead>
-                    <TableHead className="text-right">المعادلة</TableHead>
-                    <TableHead className="text-right">الإجراءات</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {categoryItems.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell>
-                        <div>
-                          <p className="font-medium">{item.name}</p>
+      {/* Results count */}
+      {(searchQuery || categoryFilter !== "all") && (
+        <p className="text-xs text-muted-foreground -mt-2">
+          عرض <span className="font-semibold text-foreground">{filteredItems.length}</span> بند
+          {filteredItems.length !== items.length && ` من أصل ${items.length}`}
+        </p>
+      )}
+
+      {/* ── Groups ───────────────────────────────────────────── */}
+      {Object.keys(groupedItems).length > 0 ? (
+        <div className="space-y-3">
+          {Object.entries(groupedItems).map(([category, catItems]) => {
+            const collapsed = collapsedGroups.has(category);
+            return (
+              <Card key={category} className="overflow-hidden border-border/70">
+                {/* Group header */}
+                <button
+                  onClick={() => toggleGroup(category)}
+                  className="w-full flex items-center justify-between px-5 py-3.5 bg-muted/40 hover:bg-muted/70 transition-colors cursor-pointer border-b border-border/50"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="h-7 w-7 rounded-md bg-primary/10 flex items-center justify-center">
+                      <Package className="h-3.5 w-3.5 text-primary" />
+                    </div>
+                    <span className="font-semibold text-foreground">{category}</span>
+                    <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
+                      {catItems.length}
+                    </span>
+                  </div>
+                  {collapsed
+                    ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    : <ChevronUp   className="h-4 w-4 text-muted-foreground" />
+                  }
+                </button>
+
+                {/* Group rows */}
+                {!collapsed && (
+                  <div className="divide-y divide-border/40">
+                    {catItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center gap-3 px-5 py-3 hover:bg-muted/30 transition-colors group"
+                      >
+                        {/* Icon */}
+                        <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${measurementColors[item.measurement_type]}`}>
+                          {measurementIcons[item.measurement_type]}
+                        </div>
+
+                        {/* Name + description */}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm text-foreground truncate">{item.name}</p>
                           {item.description && (
-                            <p className="text-sm text-muted-foreground">{item.description}</p>
+                            <p className="text-xs text-muted-foreground truncate mt-0.5">{item.description}</p>
                           )}
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className="flex items-center gap-1 w-fit">
-                          {measurementIcons[item.measurement_type]}
-                          {measurementLabels[item.measurement_type]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{item.default_unit_price.toLocaleString()} د.ل</TableCell>
-                      <TableCell className="max-w-[200px] truncate font-mono text-xs" dir="ltr">
-                        {item.formula || "-"}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleEdit(item)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => deleteMutation.mutate(item.id)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+
+                        {/* Measurement badge */}
+                        <div className="hidden sm:flex shrink-0">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${measurementColors[item.measurement_type]}`}>
+                            {measurementIcons[item.measurement_type]}
+                            {measurementLabels[item.measurement_type]}
+                          </span>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        ))
+
+                        {/* Price */}
+                        <div className="hidden md:block shrink-0 text-left" dir="ltr">
+                          <p className="text-sm font-semibold text-foreground">
+                            {item.default_unit_price.toLocaleString()}
+                          </p>
+                          <p className="text-xs text-muted-foreground">د.ل</p>
+                        </div>
+
+                        {/* Formula indicator */}
+                        {item.formula && (
+                          <div className="hidden lg:flex shrink-0">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                              <Calculator className="h-2.5 w-2.5" />
+                              معادلة
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => openEdit(item)}
+                            title="تعديل"
+                            className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-all cursor-pointer"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => confirmDelete(item)}
+                            title="حذف"
+                            className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all cursor-pointer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
       ) : (
-        <Card>
-          <CardContent className="py-12">
-            <div className="text-center text-muted-foreground">
-              <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>لا توجد بنود عامة</p>
-              <p className="text-sm">اضغط على "إضافة بند عام" لبدء إضافة البنود</p>
-            </div>
-          </CardContent>
+        /* Empty state */
+        <Card className="p-16 text-center border-dashed">
+          <div className="h-14 w-14 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-4">
+            <Package className="h-7 w-7 text-muted-foreground" />
+          </div>
+          <h3 className="text-base font-semibold text-foreground mb-1">
+            {searchQuery || categoryFilter !== "all" ? "لا توجد نتائج" : "لا توجد بنود بعد"}
+          </h3>
+          <p className="text-sm text-muted-foreground mb-4">
+            {searchQuery
+              ? `لم يُعثر على بنود تطابق "${searchQuery}"`
+              : categoryFilter !== "all"
+              ? "لا توجد بنود في هذا التصنيف"
+              : "أضف أول بند عام لاستخدامه في المشاريع"}
+          </p>
+          {!searchQuery && categoryFilter === "all" ? (
+            <Button onClick={openNew} className="gap-2 cursor-pointer">
+              <Plus className="h-4 w-4" />
+              إضافة بند عام
+            </Button>
+          ) : (
+            <Button variant="outline" onClick={() => { setSearchQuery(""); setCategoryFilter("all"); }} className="gap-2 cursor-pointer">
+              مسح الفلاتر
+            </Button>
+          )}
         </Card>
       )}
 
-      {/* Add/Edit Dialog */}
+      {/* ══════════════════════════════════════════════════════════
+          Add / Edit Dialog
+      ══════════════════════════════════════════════════════════ */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" dir="rtl">
           <DialogHeader>
-            <DialogTitle>
-              {editingItem ? "تعديل البند العام" : "إضافة بند عام جديد"}
-            </DialogTitle>
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                <Package className="h-4 w-4 text-primary" />
+              </div>
+              <div className="text-right">
+                <DialogTitle>{editingItem ? "تعديل البند العام" : "إضافة بند عام جديد"}</DialogTitle>
+                <DialogDescription className="text-xs mt-0.5">
+                  {editingItem ? "عدّل بيانات البند العام" : "أضف بندًا جديدًا للاستخدام في المشاريع"}
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">اسم البند *</Label>
+
+          <div className="space-y-4 py-1">
+
+            {/* Name */}
+            <div className="space-y-1.5">
+              <Label htmlFor="name" className="text-sm font-medium">
+                اسم البند <span className="text-destructive">*</span>
+              </Label>
               <Input
                 id="name"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="مثال: عمود خرسانة"
+                placeholder="مثال: عمود خرسانة مسلحة"
+                className="text-right"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="category">التصنيف</Label>
-              <Select
-                value={formData.category}
-                onValueChange={(value) => setFormData({ ...formData, category: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="اختر التصنيف" />
-                </SelectTrigger>
-                <SelectContent>
-                  {allCategories.map((cat) => (
-                    <SelectItem key={cat} value={cat as string}>
-                      {cat}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+
+            {/* Category + Measurement config row */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">التصنيف</Label>
+                <Select
+                  value={formData.category}
+                  onValueChange={(v) => setFormData({ ...formData, category: v })}
+                  dir="rtl"
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="اختر تصنيفًا" />
+                  </SelectTrigger>
+                  <SelectContent dir="rtl">
+                    {allCategories.map((cat) => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">نوع القياس</Label>
+                <Select
+                  value={formData.measurement_config_id || "none"}
+                  onValueChange={(v) => {
+                    const config = measurementConfigs.find((c) => c.id === v);
+                    setFormData({
+                      ...formData,
+                      measurement_config_id: v === "none" ? "" : v,
+                      component_values: {},
+                      formula: config?.formula || formData.formula,
+                    });
+                  }}
+                  dir="rtl"
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="اختر نوع القياس" />
+                  </SelectTrigger>
+                  <SelectContent dir="rtl">
+                    <SelectItem value="none">بدون نوع مخصص</SelectItem>
+                    {measurementConfigs.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name} ({c.unit_symbol})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="description">الوصف</Label>
+
+            {/* Description */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">الوصف</Label>
               <Input
-                id="description"
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                placeholder="وصف مختصر للبند"
+                placeholder="وصف مختصر للبند (اختياري)"
+                className="text-right"
               />
             </div>
 
-            {/* Measurement Config Selection */}
-            <div className="space-y-2">
-              <Label>نوع القياس</Label>
-              <Select
-                value={formData.measurement_config_id || "none"}
-                onValueChange={(value) => {
-                  const config = measurementConfigs?.find(c => c.id === value);
-                  setFormData({ 
-                    ...formData, 
-                    measurement_config_id: value === "none" ? "" : value,
-                    component_values: {},
-                    formula: config?.formula || formData.formula,
-                  });
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="اختر نوع القياس" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">بدون نوع قياس مخصص</SelectItem>
-                  {measurementConfigs?.map((config) => (
-                    <SelectItem key={config.id} value={config.id}>
-                      <div className="flex items-center gap-2">
-                        <Calculator className="h-4 w-4" />
-                        {config.name} ({config.unit_symbol})
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Component Values Input - Show when measurement config is selected */}
+            {/* Component values (when config selected) */}
             {selectedMeasurementConfig && selectedMeasurementConfig.components.length > 0 && (
-              <Card className="border-dashed">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <Calculator className="h-4 w-4" />
-                    معاينة مكونات القياس - {selectedMeasurementConfig.name}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    {selectedMeasurementConfig.components.map((comp) => (
-                      <div key={comp.symbol} className="space-y-1">
-                        <Label className="text-xs flex items-center gap-1">
-                          {comp.label}
-                          <Badge variant="outline" className="text-xs font-mono">{comp.symbol}</Badge>
-                        </Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={formData.component_values[comp.symbol] || ""}
-                          onChange={(e) => setFormData({
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                  <Calculator className="h-4 w-4" />
+                  مكونات القياس — {selectedMeasurementConfig.name}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {selectedMeasurementConfig.components.map((comp) => (
+                    <div key={comp.symbol} className="space-y-1">
+                      <Label className="text-xs flex items-center gap-1.5">
+                        {comp.label}
+                        <Badge variant="outline" className="text-[10px] font-mono px-1.5">{comp.symbol}</Badge>
+                      </Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.component_values[comp.symbol] || ""}
+                        onChange={(e) =>
+                          setFormData({
                             ...formData,
-                            component_values: {
-                              ...formData.component_values,
-                              [comp.symbol]: e.target.value,
-                            }
-                          })}
-                          placeholder="0"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  
-                  {/* Show formula and calculated quantity */}
-                  {selectedMeasurementConfig.formula && (
-                    <div className="p-2 bg-muted/50 rounded-lg space-y-1">
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>المعادلة:</span>
-                        <code className="bg-background px-2 py-0.5 rounded" dir="ltr">
-                          {selectedMeasurementConfig.formula}
-                        </code>
-                      </div>
-                      {calculatedQuantity !== null && (
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                          <span>الكمية المحسوبة:</span>
-                          <Badge variant="secondary" className="font-mono">
-                            {calculatedQuantity.toFixed(4).replace(/\.?0+$/, '')} {selectedMeasurementConfig.unit_symbol}
-                          </Badge>
-                        </div>
-                      )}
+                            component_values: { ...formData.component_values, [comp.symbol]: e.target.value },
+                          })
+                        }
+                        placeholder="0"
+                        className="text-left h-8 text-sm"
+                        dir="ltr"
+                      />
                     </div>
-                  )}
-                </CardContent>
-              </Card>
+                  ))}
+                </div>
+
+                {/* Factor */}
+                <div className="space-y-1">
+                  <Label className="text-xs">معامل القياس</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={formData.measurement_factor}
+                    onChange={(e) => setFormData({ ...formData, measurement_factor: e.target.value })}
+                    className="text-left h-8 text-sm"
+                    dir="ltr"
+                  />
+                </div>
+
+                {/* Formula display */}
+                {selectedMeasurementConfig.formula && (
+                  <div className="rounded-lg bg-background p-3 border border-border/50 space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>المعادلة:</span>
+                      <code className="bg-muted px-2 py-0.5 rounded text-xs" dir="ltr">
+                        {selectedMeasurementConfig.formula}
+                      </code>
+                    </div>
+                    {calculatedQuantity !== null && (
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">الكمية المحسوبة:</span>
+                        <span className="font-bold text-primary font-mono">
+                          {calculatedQuantity.toFixed(4).replace(/\.?0+$/, "")} {selectedMeasurementConfig.unit_symbol}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="default_unit_price">السعر الافتراضي للوحدة (د.ل)</Label>
-                <Input
-                  id="default_unit_price"
-                  type="number"
-                  step="0.01"
-                  value={formData.default_unit_price}
-                  onChange={(e) => setFormData({ ...formData, default_unit_price: e.target.value })}
-                  placeholder="0"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="measurement_factor">معامل القياس</Label>
-                <Input
-                  id="measurement_factor"
-                  type="number"
-                  step="0.01"
-                  value={formData.measurement_factor}
-                  onChange={(e) => setFormData({ ...formData, measurement_factor: e.target.value })}
-                  placeholder="1"
-                />
-              </div>
+            {/* Price */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">السعر الافتراضي للوحدة (د.ل)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={formData.default_unit_price}
+                onChange={(e) => setFormData({ ...formData, default_unit_price: e.target.value })}
+                placeholder="0"
+                className="text-left"
+                dir="ltr"
+              />
             </div>
 
-            {/* Calculated Total Preview for measurement config */}
+            {/* Total preview */}
             {formData.default_unit_price && calculatedQuantity !== null && (
-              <div className="p-3 bg-muted rounded-lg">
-                <p className="text-sm text-muted-foreground">الإجمالي المتوقع (للمعاينة)</p>
-                <p className="text-xl font-bold">
+              <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 p-3 flex items-center justify-between">
+                <span className="text-sm text-emerald-700 dark:text-emerald-400">الإجمالي التقديري:</span>
+                <span className="font-bold text-lg text-emerald-700 dark:text-emerald-300" dir="ltr">
                   {(calculatedQuantity * (parseFloat(formData.default_unit_price) || 0)).toLocaleString()} د.ل
-                </p>
+                </span>
               </div>
             )}
 
-            {/* Formula Section */}
-            <div className="space-y-2">
-              <Label htmlFor="formula" className="flex items-center gap-2">
-                <Calculator className="h-4 w-4" />
-                معادلة الحساب (اختياري)
+            {/* Formula */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium flex items-center gap-2">
+                <Calculator className="h-3.5 w-3.5 text-muted-foreground" />
+                معادلة الحساب
+                <span className="text-xs text-muted-foreground font-normal">(اختياري)</span>
               </Label>
               <Input
-                id="formula"
                 value={formData.formula}
                 onChange={(e) => setFormData({ ...formData, formula: e.target.value })}
-                placeholder={selectedMeasurementConfig?.components.length 
-                  ? `مثال: ${selectedMeasurementConfig.components.map(c => c.symbol).join(' * ')} * السعر`
-                  : "مثال: السعر * الطول * العرض"
+                placeholder={
+                  selectedMeasurementConfig?.components.length
+                    ? `مثال: ${selectedMeasurementConfig.components.map((c) => c.symbol).join(" * ")} * السعر`
+                    : "مثال: السعر * الطول * العرض"
                 }
+                className="font-mono text-sm"
                 dir="ltr"
               />
               <p className="text-xs text-muted-foreground">
                 {selectedMeasurementConfig?.components.length ? (
                   <>
-                    الرموز المتاحة من نوع القياس: {selectedMeasurementConfig.components.map(c => (
-                      <Badge key={c.symbol} variant="outline" className="mx-1 font-mono text-xs">{c.symbol}</Badge>
+                    الرموز المتاحة:{" "}
+                    {selectedMeasurementConfig.components.map((c) => (
+                      <Badge key={c.symbol} variant="outline" className="mx-0.5 font-mono text-[10px]">{c.symbol}</Badge>
                     ))}
                     <span className="mx-1">+ السعر</span>
                   </>
                 ) : (
-                  "المتغيرات المتاحة: السعر، الكمية، الطول، العرض، الارتفاع (أو بالإنجليزية: price, qty, length, width, height)"
+                  "المتغيرات: السعر، الكمية، الطول، العرض، الارتفاع"
                 )}
               </p>
-              
-              {/* Formula Example - Shows automatically with value 10 */}
+
               {formulaExample && (
-                <div className="p-3 bg-primary/10 border border-primary/20 rounded-lg space-y-2 mt-2">
-                  <div className="flex items-center gap-2 text-sm font-medium text-primary">
-                    <Calculator className="h-4 w-4" />
+                <div className="rounded-lg bg-primary/8 border border-primary/20 p-3 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-medium text-primary">
+                    <Calculator className="h-3.5 w-3.5" />
                     مثال على المعادلة (بقيمة 10 لكل متغير)
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    <div className="flex flex-wrap gap-2">
-                      {Object.entries(formulaExample.values).map(([key, value], index) => (
-                        <span key={key}>
-                          {index > 0 && <span className="mx-1">•</span>}
-                          <Badge variant="outline" className="font-mono text-xs">{key}</Badge> = {value}
-                        </span>
-                      ))}
-                    </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(formulaExample.vals).map(([key, val]) => (
+                      <span key={key} className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Badge variant="outline" className="font-mono text-[10px]">{key}</Badge>
+                        = {val}
+                      </span>
+                    ))}
                   </div>
-                  <div className="flex items-center justify-between pt-1 border-t border-primary/20">
-                    <span className="text-sm">النتيجة:</span>
-                    <Badge variant="default" className="font-mono text-base">
+                  <div className="flex items-center justify-between pt-1 border-t border-primary/15">
+                    <span className="text-sm text-muted-foreground">النتيجة:</span>
+                    <span className="font-bold font-mono text-primary">
                       {formulaExample.result.toLocaleString()} د.ل
-                    </Badge>
+                    </span>
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="notes">ملاحظات</Label>
+            {/* Notes */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">ملاحظات</Label>
               <Textarea
-                id="notes"
                 value={formData.notes}
                 onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                 placeholder="ملاحظات إضافية..."
+                rows={3}
+                className="resize-none text-right"
               />
             </div>
           </div>
+
+          <DialogFooter className="gap-2 pt-2">
+            <Button variant="outline" onClick={closeDialog} className="cursor-pointer">إلغاء</Button>
+            <Button onClick={handleSubmit} disabled={saveMutation.isPending} className="gap-2 cursor-pointer">
+              {saveMutation.isPending ? (
+                <>
+                  <div className="h-4 w-4 rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground animate-spin" />
+                  جارٍ الحفظ...
+                </>
+              ) : editingItem ? (
+                <><Pencil className="h-4 w-4" /> تحديث</>
+              ) : (
+                <><Plus className="h-4 w-4" /> إضافة</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══════════════════════════════════════════════════════════
+          Delete Confirmation Dialog
+      ══════════════════════════════════════════════════════════ */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent dir="rtl">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-destructive/10 flex items-center justify-center shrink-0">
+                <Trash2 className="h-5 w-5 text-destructive" />
+              </div>
+              <div className="text-right">
+                <DialogTitle>تأكيد الحذف</DialogTitle>
+                <DialogDescription className="text-xs mt-0.5">
+                  هذا الإجراء لا يمكن التراجع عنه
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          {deleteTarget && (
+            <div className="rounded-lg bg-muted/50 border border-border/50 px-4 py-3 my-1">
+              <p className="font-medium text-foreground">{deleteTarget.name}</p>
+              {deleteTarget.category && (
+                <p className="text-xs text-muted-foreground mt-0.5">{deleteTarget.category}</p>
+              )}
+            </div>
+          )}
+          <p className="text-sm text-muted-foreground">
+            هل أنت متأكد من حذف هذا البند؟ سيتم إزالته نهائيًا ولن يكون متاحًا في المشاريع.
+          </p>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={handleCloseDialog}>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)} className="cursor-pointer">
               إلغاء
             </Button>
-            <Button onClick={handleSubmit} disabled={saveMutation.isPending}>
-              {saveMutation.isPending ? "جاري الحفظ..." : editingItem ? "تحديث" : "إضافة"}
+            <Button
+              variant="destructive"
+              onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+              disabled={deleteMutation.isPending}
+              className="gap-2 cursor-pointer"
+            >
+              {deleteMutation.isPending ? (
+                <div className="h-4 w-4 rounded-full border-2 border-destructive-foreground/40 border-t-destructive-foreground animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              حذف البند
             </Button>
           </DialogFooter>
         </DialogContent>
