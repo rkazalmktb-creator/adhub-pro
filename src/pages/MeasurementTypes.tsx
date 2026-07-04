@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { safeEvaluate } from "@/lib/safeFormula";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -18,8 +19,11 @@ import {
   X,
   Calculator,
   Variable,
-  Tag,
   Info,
+  FlaskConical,
+  CheckCircle2,
+  XCircle,
+  CircleDot,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import type { Json } from "@/integrations/supabase/types";
@@ -58,9 +62,13 @@ const emptyComponent: MeasurementComponent = {
 
 const MeasurementTypes = () => {
   const queryClient = useQueryClient();
-  const [editingItem, setEditingItem] = useState<MeasurementConfig | null>(null);
-  const [formData, setFormData] = useState(emptyFormData);
-  const [newComponent, setNewComponent] = useState(emptyComponent);
+  const [editingItem, setEditingItem]     = useState<MeasurementConfig | null>(null);
+  const [formData, setFormData]           = useState(emptyFormData);
+  const [newComponent, setNewComponent]   = useState(emptyComponent);
+  // Interactive formula tester
+  const [testValues, setTestValues]       = useState<Record<string, string>>({});
+  // Editing component state
+  const [editingCompIndex, setEditingCompIndex] = useState<number | null>(null);
 
   // Fetch measurement configs
   const { data: configs, isLoading } = useQuery({
@@ -148,10 +156,93 @@ const MeasurementTypes = () => {
     },
   });
 
+  // Live formula analysis and tester
+  const formulaAnalysis = useMemo(() => {
+    const formula = formData.formula.trim();
+    if (!formula) return null;
+
+    if (formData.components.length === 0) {
+      return { status: "error" as const, message: "يجب إضافة مكونات أولاً لتتمكن من صياغة المعادلة." };
+    }
+
+    // Extract all words/tokens (symbols or Arabic words)
+    const words = formula.match(/[a-zA-Z\u0600-\u06FF]+/g) || [];
+    
+    const allowedSymbols = formData.components.map((c) => c.symbol.toUpperCase());
+    const allowedLabels  = formData.components.map((c) => c.label);
+
+    for (const word of words) {
+      const upperWord = word.toUpperCase();
+      
+      // Valid symbols or standard functions/constants
+      if (allowedSymbols.includes(upperWord) || ["PI", "E", "SIN", "COS", "TAN", "LOG", "SQRT"].includes(upperWord)) {
+        continue;
+      }
+      
+      // User typed the Arabic label (like "ط") instead of the symbol (like "L")
+      const labelIdx = allowedLabels.indexOf(word);
+      if (labelIdx !== -1) {
+        const correspondingSymbol = formData.components[labelIdx].symbol;
+        return {
+          status: "error" as const,
+          message: `يرجى كتابة رمز المتغير [ ${correspondingSymbol} ] بدلاً من مسمّاه العربي [ ${word} ].`
+        };
+      }
+      
+      // Unrecognized symbol/word
+      return {
+        status: "error" as const,
+        message: `المتغير [ ${word} ] غير معرف. يرجى استخدام أحد الرموز المضافة: ${allowedSymbols.join(" ، ")}`
+      };
+    }
+
+    // Check if any component has no test value
+    const missing = formData.components.filter(
+      (c) => !testValues[c.symbol] || testValues[c.symbol].trim() === ""
+    );
+    if (missing.length > 0) {
+      return {
+        status: "incomplete" as const,
+        message: `أدخل قيمًا تجريبية للمتغيرات التالية: ${missing.map((c) => `${c.label} (${c.symbol})`).join("، ")}`
+      };
+    }
+
+    // Build evaluated formula (replace case-insensitively)
+    let evaluated = formula;
+    for (const comp of formData.components) {
+      const val = parseFloat(testValues[comp.symbol]);
+      if (isNaN(val)) {
+        return { status: "error" as const, message: `القيمة للمتغير [ ${comp.label} ] غير صالحة.` };
+      }
+      evaluated = evaluated.replace(new RegExp(comp.symbol, "gi"), val.toString());
+    }
+
+    // Evaluate
+    const result = safeEvaluate(evaluated);
+    if (result === null) {
+      if (/[\+\-\*\/]$/.test(formula.trim())) {
+        return { status: "error" as const, message: "المعادلة غير مكتملة (تنتهي بعلامة عملية حسابية مثل + أو *)." };
+      }
+      const openCount = (formula.match(/\(/g) || []).length;
+      const closeCount = (formula.match(/\)/g) || []).length;
+      if (openCount !== closeCount) {
+        return { status: "error" as const, message: "تأكد من إغلاق جميع الأقواس المفتوحة بشكل صحيح." };
+      }
+      if (/[\+\-\*\/]{2,}/.test(formula.replace(/\s+/g, ""))) {
+        return { status: "error" as const, message: "تكرار متتالي للعمليات الحسابية (مثل ** أو ++)." };
+      }
+      return { status: "error" as const, message: "صيغة المعادلة غير صحيحة رياضياً. تأكد من صياغتها بشكل صحيح (مثال: L * W)." };
+    }
+
+    return { status: "ok" as const, result, evaluated };
+  }, [formData.formula, formData.components, testValues]);
+
   const handleResetForm = () => {
     setEditingItem(null);
     setFormData(emptyFormData);
     setNewComponent(emptyComponent);
+    setTestValues({});
+    setEditingCompIndex(null);
   };
 
   const handleEdit = (config: MeasurementConfig) => {
@@ -177,8 +268,11 @@ const MeasurementTypes = () => {
 
     const cleanSymbol = newComponent.symbol.trim().toUpperCase();
 
-    // Check for duplicate symbols
-    if (formData.components.some(c => c.symbol === cleanSymbol)) {
+    // Check for duplicate symbols (excluding current edited index)
+    const isDuplicate = formData.components.some(
+      (c, idx) => c.symbol === cleanSymbol && idx !== editingCompIndex
+    );
+    if (isDuplicate) {
       toast({
         title: "خطأ",
         description: "الرمز مستخدم بالفعل",
@@ -187,14 +281,43 @@ const MeasurementTypes = () => {
       return;
     }
 
-    // Auto-generate english name if empty
     const generatedName = newComponent.name.trim() || `component_${cleanSymbol.toLowerCase()}`;
+    const componentData = { ...newComponent, name: generatedName, symbol: cleanSymbol };
 
-    setFormData({
-      ...formData,
-      components: [...formData.components, { ...newComponent, name: generatedName, symbol: cleanSymbol }],
-    });
+    if (editingCompIndex !== null) {
+      // Edit mode
+      const updatedComponents = [...formData.components];
+      const oldSymbol = formData.components[editingCompIndex].symbol;
+      let updatedFormula = formData.formula;
+      
+      // Automatically rename symbol in formula if changed
+      if (oldSymbol !== cleanSymbol) {
+        updatedFormula = updatedFormula.replace(new RegExp(`\\b${oldSymbol}\\b`, "g"), cleanSymbol);
+      }
+
+      updatedComponents[editingCompIndex] = componentData;
+      setFormData({
+        ...formData,
+        components: updatedComponents,
+        formula: updatedFormula,
+      });
+      setEditingCompIndex(null);
+      toast({ title: "تم تعديل المكون بنجاح" });
+    } else {
+      // Add mode
+      setFormData({
+        ...formData,
+        components: [...formData.components, componentData],
+      });
+      toast({ title: "تم إضافة المكون بنجاح" });
+    }
+
     setNewComponent(emptyComponent);
+  };
+
+  const handleEditComponent = (index: number) => {
+    setNewComponent(formData.components[index]);
+    setEditingCompIndex(index);
   };
 
   const handleRemoveComponent = (index: number) => {
@@ -204,10 +327,16 @@ const MeasurementTypes = () => {
     // Also clean up references in formula
     let updatedFormula = formData.formula;
     if (componentToRemove) {
-      updatedFormula = updatedFormula.replace(new RegExp(componentToRemove.symbol, 'g'), '');
+      updatedFormula = updatedFormula.replace(new RegExp(`\\b${componentToRemove.symbol}\\b`, "g"), "");
     }
     
     setFormData({ ...formData, components: newComponents, formula: updatedFormula });
+    if (editingCompIndex === index) {
+      setEditingCompIndex(null);
+      setNewComponent(emptyComponent);
+    } else if (editingCompIndex !== null && editingCompIndex > index) {
+      setEditingCompIndex(editingCompIndex - 1);
+    }
   };
 
   const handleSubmit = () => {
@@ -245,11 +374,10 @@ const MeasurementTypes = () => {
   };
 
   const insertSymbolToFormula = (symbol: string) => {
-    setFormData({
-      ...formData,
-      formula: formData.formula + symbol,
-    });
+    setFormData({ ...formData, formula: formData.formula + symbol });
   };
+
+  const clearTestValues = () => setTestValues({});
 
   // Preset layouts helper
   const applyPreset = (presetType: "linear" | "square" | "cubic") => {
@@ -389,22 +517,43 @@ const MeasurementTypes = () => {
                     {formData.components.map((comp, idx) => (
                       <div
                         key={idx}
-                        className="flex items-center justify-between p-2 rounded border bg-background text-sm transition-all hover:border-primary/30"
+                        className={`flex items-center justify-between p-2 rounded-lg border text-sm transition-all ${
+                          editingCompIndex === idx
+                            ? "border-primary bg-primary/5 ring-1 ring-primary"
+                            : "border-border bg-background hover:border-primary/30"
+                        }`}
                       >
                         <div className="flex items-center gap-2">
                           <span className="font-semibold text-primary">{comp.label}</span>
                           <Badge variant="secondary" className="font-mono text-xs">
                             {comp.symbol}
                           </Badge>
+                          {editingCompIndex === idx && (
+                            <Badge variant="outline" className="text-[9px] bg-primary/10 text-primary border-primary/20">
+                              جاري التعديل
+                            </Badge>
+                          )}
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 text-destructive hover:bg-destructive/10 cursor-pointer"
-                          onClick={() => handleRemoveComponent(idx)}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-muted-foreground hover:text-foreground cursor-pointer"
+                            onClick={() => handleEditComponent(idx)}
+                            title="تعديل المكون"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-destructive hover:bg-destructive/10 cursor-pointer"
+                            onClick={() => handleRemoveComponent(idx)}
+                            title="حذف المكون"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -440,34 +589,45 @@ const MeasurementTypes = () => {
                       type="button" 
                       onClick={handleAddComponent} 
                       size="sm" 
-                      className="w-full h-8 text-xs cursor-pointer"
+                      className="w-full h-8 text-xs cursor-pointer gap-1"
                     >
-                      <Plus className="h-3.5 w-3.5 ml-0.5" />
-                      أضف
+                      {editingCompIndex !== null ? (
+                        <>
+                          <Pencil className="h-3.5 w-3.5 ml-0.5" />
+                          تعديل
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="h-3.5 w-3.5 ml-0.5" />
+                          أضف
+                        </>
+                      )}
                     </Button>
                   </div>
                 </div>
               </div>
 
-              {/* Equation formula section */}
-              <div className="space-y-2">
+              {/* ── Equation formula section ─────────────────────── */}
+              <div className="space-y-3">
                 <Label className="text-xs font-semibold">صيغة المعادلة الحسابية</Label>
-                
-                {/* Operator and symbols pad */}
+
+                {/* Symbol pad */}
                 {formData.components.length > 0 ? (
-                  <div className="flex flex-wrap gap-1 p-2 rounded border bg-muted/30">
+                  <div className="flex flex-wrap gap-1 p-2 rounded-lg border bg-muted/30">
                     {formData.components.map((comp, idx) => (
                       <Button
                         key={idx}
                         variant="secondary"
                         size="sm"
-                        className="h-7 text-xs font-mono gap-1 cursor-pointer"
+                        className="h-7 text-xs font-mono cursor-pointer"
                         onClick={() => insertSymbolToFormula(comp.symbol)}
+                        title={comp.label}
                       >
                         {comp.symbol}
+                        <span className="text-[9px] text-muted-foreground mr-1">({comp.label})</span>
                       </Button>
                     ))}
-                    <div className="h-5 w-px bg-border mx-1 my-auto"></div>
+                    <div className="h-5 w-px bg-border mx-1 my-auto" />
                     {[" * ", " + ", " - ", " / ", " ( ", " ) "].map((op) => (
                       <Button
                         key={op}
@@ -481,9 +641,10 @@ const MeasurementTypes = () => {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-xs text-muted-foreground">أضف مكونات لتفعيل لوحة الرموز المساعدة.</div>
+                  <p className="text-xs text-muted-foreground">أضف مكونات لتفعيل لوحة الرموز المساعدة.</p>
                 )}
 
+                {/* Formula input */}
                 <Input
                   id="formula"
                   value={formData.formula}
@@ -493,23 +654,123 @@ const MeasurementTypes = () => {
                   dir="ltr"
                 />
 
-                {/* Live Formula Preview */}
+                {/* Human-readable translation */}
                 {formData.formula && formData.components.length > 0 && (
-                  <div className="p-2.5 bg-primary/5 rounded border border-primary/20 text-xs flex flex-col gap-1">
-                    <span className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
-                      <Info className="h-3.5 w-3.5 text-primary" />
-                      ترجمة المعادلة للمستخدم:
-                    </span>
-                    <code className="text-xs font-semibold text-primary font-mono" dir="rtl">
-                      {formData.components.reduce(
-                        (formula, comp) =>
-                          formula.replace(
-                            new RegExp(comp.symbol, "g"),
-                            ` [ ${comp.label} ] `
-                          ),
-                        formData.formula
-                      ).replace(/\*/g, "×").replace(/\//g, "÷")}
-                    </code>
+                  <div className="flex items-start gap-2 p-2.5 bg-primary/5 rounded-lg border border-primary/15 text-xs">
+                    <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-[10px] text-muted-foreground mb-0.5">ترجمة المعادلة:</p>
+                      <code className="font-semibold text-primary" dir="rtl">
+                        {formData.components
+                          .reduce(
+                            (f, c) => f.replace(new RegExp(c.symbol, "g"), `[${c.label}]`),
+                            formData.formula
+                          )
+                          .replace(/\*/g, "×")
+                          .replace(/\//g, "÷")}
+                      </code>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Interactive Formula Tester ───────────────────── */}
+                {formData.formula && formData.components.length > 0 && (
+                  <div className="rounded-xl border border-dashed border-amber-300 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-950/20 overflow-hidden">
+                    {/* Tester header */}
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-amber-100/70 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-amber-800 dark:text-amber-300">
+                        <FlaskConical className="h-4 w-4" />
+                        اختبر المعادلة بقيم حقيقية
+                      </div>
+                      {Object.keys(testValues).length > 0 && (
+                        <button
+                          onClick={clearTestValues}
+                          className="text-[10px] text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <X className="h-3 w-3" /> مسح القيم
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="p-4 space-y-3">
+                      {/* Variable inputs */}
+                      <div className="grid grid-cols-2 gap-2">
+                        {formData.components.map((comp) => (
+                          <div key={comp.symbol} className="space-y-1">
+                            <label className="text-[11px] font-medium text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                              <code className="bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 px-1.5 py-0.5 rounded font-mono text-[10px]">
+                                {comp.symbol}
+                              </code>
+                              {comp.label}
+                            </label>
+                            <Input
+                              type="number"
+                              step="any"
+                              value={testValues[comp.symbol] ?? ""}
+                              onChange={(e) =>
+                                setTestValues((prev) => ({ ...prev, [comp.symbol]: e.target.value }))
+                              }
+                              placeholder="أدخل قيمة..."
+                              className="h-8 text-sm text-left bg-white dark:bg-amber-950/30 border-amber-200 dark:border-amber-700"
+                              dir="ltr"
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Live result */}
+                      <div className={`rounded-lg p-3 border flex items-center gap-3 transition-all duration-200 ${
+                        !formulaAnalysis
+                          ? "bg-muted/40 border-border"
+                          : formulaAnalysis.status === "ok"
+                          ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-700"
+                          : formulaAnalysis.status === "incomplete"
+                          ? "bg-muted/40 border-border"
+                          : "bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-700"
+                      }`}>
+                        {/* Icon */}
+                        <div className="shrink-0">
+                          {!formulaAnalysis || formulaAnalysis.status === "incomplete" ? (
+                            <CircleDot className="h-5 w-5 text-muted-foreground" />
+                          ) : formulaAnalysis.status === "ok" ? (
+                            <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                          ) : (
+                            <XCircle className="h-5 w-5 text-red-500" />
+                          )}
+                        </div>
+
+                        {/* Message */}
+                        <div className="flex-1 min-w-0">
+                          {!formulaAnalysis ? (
+                            <p className="text-xs text-muted-foreground">
+                              أدخل المعادلة أولاً لتجربتها
+                            </p>
+                          ) : formulaAnalysis.status === "incomplete" ? (
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                              {formulaAnalysis.message}
+                            </p>
+                          ) : formulaAnalysis.status === "ok" ? (
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">المعادلة صحيحة ✓</p>
+                              <span className="font-bold font-mono text-lg text-emerald-700 dark:text-emerald-300" dir="ltr">
+                                = {formulaAnalysis.result.toFixed(4).replace(/\.?0+$/, "")}
+                              </span>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-red-600 dark:text-red-400 leading-relaxed font-medium">
+                              {formulaAnalysis.message}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Evaluated expression preview */}
+                      {formulaAnalysis?.status === "ok" && (
+                        <p className="text-[10px] text-muted-foreground font-mono text-left" dir="ltr">
+                          {formulaAnalysis.evaluated} = {formulaAnalysis.result.toFixed(4).replace(/\.?0+$/, "")}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
