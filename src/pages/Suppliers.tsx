@@ -36,6 +36,15 @@ const paymentStatusLabels: Record<string, { label: string; color: string }> = {
   due: { label: "مستحق", color: "bg-red-500/10 text-red-500" },
 };
 
+const translateCategory = (cat: string | null): string => {
+  if (!cat) return "";
+  const map: Record<string, string> = {
+    supplier: "مورد",
+    labor: "عمالة / مقاول",
+  };
+  return map[cat.toLowerCase()] || cat;
+};
+
 interface SupplierForm {
   name: string;
   category: string;
@@ -84,9 +93,11 @@ export default function Suppliers() {
         .select(`
           supplier_id,
           total_amount,
+          paid_amount,
           project_id,
           projects (
-            client_id
+            client_id,
+            project_type
           )
         `);
       
@@ -98,6 +109,9 @@ export default function Suppliers() {
         clientCount: number; 
         projectCount: number;
         totalAmount: number;
+        paidAmount: number;
+        contractingAmount: number;
+        finishingAmount: number;
         clients: Set<string>;
         projects: Set<string>;
       }> = {};
@@ -110,12 +124,24 @@ export default function Suppliers() {
               clientCount: 0,
               projectCount: 0,
               totalAmount: 0,
+              paidAmount: 0,
+              contractingAmount: 0,
+              finishingAmount: 0,
               clients: new Set(),
               projects: new Set(),
             };
           }
+          const amt = Number(purchase.total_amount) || 0;
           stats[purchase.supplier_id].purchaseCount++;
-          stats[purchase.supplier_id].totalAmount += Number(purchase.total_amount) || 0;
+          stats[purchase.supplier_id].totalAmount += amt;
+          stats[purchase.supplier_id].paidAmount += Number(purchase.paid_amount) || 0;
+          
+          const isFinishing = purchase.projects?.project_type === 'finishing';
+          if (isFinishing) {
+            stats[purchase.supplier_id].finishingAmount += amt;
+          } else {
+            stats[purchase.supplier_id].contractingAmount += amt;
+          }
           
           if (purchase.project_id) {
             stats[purchase.supplier_id].projects.add(purchase.project_id);
@@ -282,13 +308,13 @@ export default function Suppliers() {
             className="w-48"
           />
           <select 
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm font-semibold text-primary"
             value={categoryFilter} 
             onChange={(e) => setCategoryFilter(e.target.value)}
           >
-            <option value="all">كل الأنشطة</option>
+            <option value="all">كل الأنشطة / التصنيفات</option>
             {categories.map((c) => (
-              <option key={c} value={c}>{c}</option>
+              <option key={c} value={c}>{translateCategory(c)}</option>
             ))}
           </select>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -383,58 +409,72 @@ export default function Suppliers() {
       </div>
 
       {/* Stats Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary/10 rounded-lg">
-              <Truck className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">إجمالي الموردين</p>
-              <p className="text-2xl font-bold">{suppliers?.length || 0}</p>
-            </div>
+      {(() => {
+        const overall = Object.values(purchaseStats || {}).reduce(
+          (acc, s) => {
+            acc.totalAmount += s.totalAmount;
+            acc.paidAmount += s.paidAmount;
+            return acc;
+          },
+          { totalAmount: 0, paidAmount: 0 }
+        );
+        const remaining = overall.totalAmount - overall.paidAmount;
+
+        return (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-primary/10 rounded-lg">
+                  <Truck className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">إجمالي الموردين</p>
+                  <p className="text-2xl font-bold">{suppliers?.length || 0}</p>
+                </div>
+              </div>
+            </Card>
+            <Card className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-500/10 rounded-lg">
+                  <ShoppingCart className="h-5 w-5 text-blue-500" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">إجمالي المشتريات</p>
+                  <p className="text-lg font-bold text-blue-600">
+                    {formatCurrencyLYD(overall.totalAmount)}
+                  </p>
+                </div>
+              </div>
+            </Card>
+            <Card className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-500/10 rounded-lg">
+                  <ShoppingCart className="h-5 w-5 text-emerald-500" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">المبالغ المسددة</p>
+                  <p className="text-lg font-bold text-emerald-600">
+                    {formatCurrencyLYD(overall.paidAmount)}
+                  </p>
+                </div>
+              </div>
+            </Card>
+            <Card className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-red-500/10 rounded-lg">
+                  <ShoppingCart className="h-5 w-5 text-red-500" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">المتبقي المستحق</p>
+                  <p className={`text-lg font-bold ${remaining > 0.01 ? 'text-destructive font-black' : 'text-muted-foreground'}`}>
+                    {formatCurrencyLYD(remaining)}
+                  </p>
+                </div>
+              </div>
+            </Card>
           </div>
-        </Card>
-        <Card className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-500/10 rounded-lg">
-              <ShoppingCart className="h-5 w-5 text-green-500" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">إجمالي المشتريات</p>
-              <p className="text-xl font-bold">
-                {formatCurrencyLYD(suppliers?.reduce((sum, s) => sum + Number(s.total_purchases), 0) || 0)}
-              </p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-500/10 rounded-lg">
-              <Building className="h-5 w-5 text-blue-500" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">عملاء مرتبطين</p>
-              <p className="text-2xl font-bold">
-                {new Set(Object.values(purchaseStats || {}).flatMap((s) => Array.from(s.clients))).size}
-              </p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-orange-500/10 rounded-lg">
-              <FolderOpen className="h-5 w-5 text-orange-500" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">مشاريع مرتبطة</p>
-              <p className="text-2xl font-bold">
-                {new Set(Object.values(purchaseStats || {}).flatMap((s) => Array.from(s.projects))).size}
-              </p>
-            </div>
-          </div>
-        </Card>
-      </div>
+        );
+      })()}
 
       {/* Suppliers Grid */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -443,9 +483,17 @@ export default function Suppliers() {
             purchaseCount: 0, 
             clientCount: 0, 
             projectCount: 0, 
-            totalAmount: 0 
+            totalAmount: 0,
+            paidAmount: 0
           };
-          const status = paymentStatusLabels[supplier.payment_status || "paid"];
+          
+          const dynamicStatus = stats.totalAmount === 0 
+            ? paymentStatusLabels.paid 
+            : stats.paidAmount >= stats.totalAmount 
+              ? paymentStatusLabels.paid 
+              : stats.paidAmount > 0 
+                ? paymentStatusLabels.partial 
+                : paymentStatusLabels.due;
           
           return (
             <Link key={supplier.id} to={`/suppliers/${supplier.id}`}>
@@ -460,7 +508,7 @@ export default function Suppliers() {
                       <div>
                         <h3 className="text-lg font-bold">{supplier.name}</h3>
                         {supplier.category && (
-                          <Badge variant="outline" className="mt-1">{supplier.category}</Badge>
+                          <Badge variant="outline" className="mt-1 font-semibold">{translateCategory(supplier.category)}</Badge>
                         )}
                       </div>
                     </div>
@@ -525,13 +573,40 @@ export default function Suppliers() {
                     </div>
                   </div>
 
-                  {/* Total Purchases */}
-                  <div className="flex items-center justify-between pt-3 border-t border-border">
-                    <div>
-                      <p className="text-xs text-muted-foreground">إجمالي المشتريات</p>
-                      <p className="text-lg font-bold text-primary">{formatCurrencyLYD(supplier.total_purchases)}</p>
+                  {/* Purchases Breakdown by Project Type */}
+                  <div className="pt-2 text-xs space-y-1 bg-muted/40 p-2 rounded-lg border">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground text-[10px]">⚙️ فواتير المقاولات:</span>
+                      <span className="font-semibold text-foreground text-[11px]">{formatCurrencyLYD(stats.contractingAmount)}</span>
                     </div>
-                    <Badge className={status.color}>{status.label}</Badge>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground text-[10px]">✨ فواتير التشطيبات:</span>
+                      <span className="font-semibold text-primary text-[11px]">{formatCurrencyLYD(stats.finishingAmount)}</span>
+                    </div>
+                  </div>
+
+                  {/* Total Purchases and Balance Breakdown */}
+                  <div className="pt-3 border-t border-border space-y-2">
+                    <div className="grid grid-cols-3 gap-1 text-center text-xs">
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-0.5">المشتريات</p>
+                        <p className="font-bold text-foreground">{formatCurrencyLYD(stats.totalAmount)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-0.5">المدفوع</p>
+                        <p className="font-bold text-emerald-600">{formatCurrencyLYD(stats.paidAmount)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-0.5">المتبقي</p>
+                        <p className={`font-bold ${stats.totalAmount - stats.paidAmount > 0.01 ? 'text-destructive font-black' : 'text-muted-foreground'}`}>
+                          {formatCurrencyLYD(stats.totalAmount - stats.paidAmount)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-border/50">
+                      <span className="text-[10px] text-muted-foreground">حالة السداد:</span>
+                      <Badge className={dynamicStatus.color}>{dynamicStatus.label}</Badge>
+                    </div>
                   </div>
                 </div>
               </Card>

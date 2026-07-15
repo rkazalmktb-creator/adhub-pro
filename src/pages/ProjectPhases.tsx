@@ -147,7 +147,7 @@ const ProjectPhases = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("projects")
-        .select("*, clients(id, name)")
+        .select("*, clients(id, name), engineers:supervising_engineer_id(id, name)")
         .eq("id", projectId!)
         .maybeSingle();
       if (error) throw error;
@@ -551,23 +551,343 @@ const ProjectPhases = () => {
     }, 0) || 0;
     const clientPaidActual = allocations?.reduce((sum, a) => sum + Number(a.amount || 0), 0) || 0;
 
-    const phasePercentage = phase.has_percentage && phase.percentage_value > 0 ? Number(phase.percentage_value) : 0;
+    const projectPct = project?.project_type === "finishing" ? Number((project as any).finishing_percentage || 0) : 0;
+    const phasePercentage = phase.has_percentage && phase.percentage_value > 0 ? Number(phase.percentage_value) : projectPct;
     const totalPercentageFee = phasePercentage > 0 ? (totalPurch + totalRent) * phasePercentage / 100 : 0;
     const totalDueFromClient = totalItems + totalPurch + totalRent + totalPercentageFee;
     const clientRemaining = totalDueFromClient - clientPaidActual;
 
     const treasuryName = phase.treasury_id ? treasuries?.find(t => t.id === phase.treasury_id)?.name : "";
     const dateStr = format(new Date(), "yyyy/MM/dd", { locale: ar });
+    const year = new Date(phase.created_at || new Date()).getFullYear();
+    const yearCode = String(year).slice(-2);
+    const calculatedPhaseNo = (phases?.findIndex(p => p.id === phase.id) ?? -1) + 1 || phase.phase_number || 1;
+    
+    // Fetch phase serial number to generate a sequential invoice number
+    let phaseSerial = 1;
+    if (phase?.created_at) {
+      const { count: phCount, error: phErr } = await supabase
+        .from("project_phases")
+        .select("*", { count: "exact", head: true })
+        .lte("created_at", phase.created_at);
+      if (!phErr && phCount) {
+        phaseSerial = phCount;
+      }
+    }
+    const phaseYear = new Date(phase.created_at || new Date()).getFullYear();
+    const systemInvoiceNo = `PH-${phaseYear}-${String(phaseSerial).padStart(4, '0')}`;
+
+    if (isClient) {
+      // ── Client Invoice Custom Structure (exactly like the screenshot) ──
+      const totalQuantitySum = items?.reduce((sum, item) => sum + Number(item.quantity || 0), 0).toFixed(2).replace(/\.00$/, '') || '0';
+      const allPrices = items?.map(i => Number(i.unit_price)) || [];
+      const isPriceConstant = allPrices.length > 0 && allPrices.every(p => p === allPrices[0]);
+      const priceDisplay = isPriceConstant ? allPrices[0].toLocaleString() : '';
+
+      const itemsTotal = items?.reduce((sum, item) => sum + Number(item.total_price || 0), 0) || 0;
+      const totalIntegerPart = Math.floor(itemsTotal);
+      const totalDecimalPart = Math.round((itemsTotal - totalIntegerPart) * 100);
+      const totalDirhamsDisplay = totalDecimalPart > 0 ? String(totalDecimalPart).padStart(2, '0') : '---';
+      const totalDinarsDisplay = totalIntegerPart.toLocaleString();
+
+      const engineerName = (project as any)?.engineers?.name || 'علي بن عروس شميله';
+
+      let clientInvoiceHTML = `
+        <style>
+          .client-invoice-container {
+            direction: rtl;
+            font-family: 'Tajawal', 'Segoe UI', sans-serif;
+            color: #000;
+            padding: 10px;
+          }
+          .client-invoice-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-family: 'Tajawal', sans-serif;
+          }
+          .client-invoice-table th, .client-invoice-table td {
+            border: 1.5px solid #000;
+            padding: 8px 10px;
+            font-size: 11pt;
+            color: #000;
+          }
+          .client-invoice-table th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+            text-align: center;
+          }
+          .client-invoice-table td {
+            vertical-align: middle;
+          }
+        </style>
+        <div class="client-invoice-container">
+          <!-- Scraped Header Metadata -->
+          <div class="print-report-header" style="display: none;">
+            <div class="print-report-title">فاتورة الأعمال المنجزة</div>
+            <div class="print-report-subtitle">رقم الفاتورة: ${systemInvoiceNo} &nbsp;|&nbsp; التاريخ: ${dateStr}</div>
+            <div class="print-report-meta">${project?.reference_number ? `رقم المشروع: ${project.reference_number}` : ''}</div>
+          </div>
+
+          <!-- Centered Invoice Title -->
+          <div style="text-align: center; margin-top: 10px; margin-bottom: 20px;">
+            <h3 style="font-size: 14pt; font-weight: bold; display: inline-block; border-bottom: 2px solid #000; padding-bottom: 4px; margin: 0;">
+              فاتورة ${calculatedPhaseNo} (${phase.name})
+            </h3>
+          </div>
+
+          <!-- Project & Client info box -->
+          <div style="margin-top: 10px; margin-bottom: 20px; font-family: 'Tajawal', sans-serif; border: 1.5px solid #000; padding: 12px; border-radius: 6px; background-color: #fafafa;">
+            <table style="width: 100%; border: none; border-collapse: collapse; direction: rtl; text-align: right;">
+              <tr style="border: none;">
+                <td style="border: none; padding: 4px; font-size: 11.5pt; width: 50%;">
+                  <strong style="color: #666;">المشروع:</strong> 
+                  <span style="font-size: 11.5pt; font-weight: bold; color: #000; margin-right: 5px;">${project?.name || ""}</span>
+                </td>
+                <td style="border: none; padding: 4px; font-size: 11.5pt; width: 50%;">
+                  <strong style="color: #666;">العميل:</strong> 
+                  <span style="font-size: 11.5pt; font-weight: bold; color: #000; margin-right: 5px;">الأخ / ${project?.clients?.name || ""}</span>
+                </td>
+              </tr>
+              ${project?.reference_number ? `
+                <tr style="border: none;">
+                  <td style="border: none; padding: 4px; font-size: 11pt; width: 50%;">
+                    <strong style="color: #666;">رقم المشروع:</strong> 
+                    <span style="font-size: 11pt; font-weight: bold; color: #000; margin-right: 5px;">${project.reference_number}</span>
+                  </td>
+                  <td style="border: none; padding: 4px; font-size: 11pt; width: 50%;"></td>
+                </tr>
+              ` : ''}
+            </table>
+          </div>
+
+          <!-- Table of Completed Works -->
+          <table class="client-invoice-table">
+            <thead>
+              <!-- First Header Row -->
+              <tr>
+                <th rowspan="2" style="width: 5%; vertical-align: middle;">ر.م</th>
+                <th rowspan="2" style="width: 35%; text-align: right; vertical-align: middle;">الأعمال المنجزة</th>
+                <th rowspan="2" style="width: 10%; vertical-align: middle;">الوحدة</th>
+                <th colspan="2" style="width: 25%;">الكمية</th>
+                <th rowspan="2" style="width: 12%; vertical-align: middle;">السعر<br/>(دينار)</th>
+                <th colspan="2" style="width: 13%;">الإجمالي</th>
+              </tr>
+              <!-- Second Header Row -->
+              <tr>
+                <th style="text-align: right;">تفصيلي</th>
+                <th style="width: 10%;">التكعيب</th>
+                <th style="width: 5%;">درهم</th>
+                <th style="width: 8%;">دينار</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(items || []).map((item: any, idx: number) => {
+                const totalPrice = Number(item.total_price || 0);
+                const integerPart = Math.floor(totalPrice);
+                const decimalPart = Math.round((totalPrice - integerPart) * 100);
+                const dirhamStr = decimalPart > 0 ? String(decimalPart).padStart(2, '0') : '---';
+                const dinarStr = integerPart.toLocaleString();
+
+                const componentLabels: Record<string, string> = { L: 'الطول', W: 'العرض', H: 'الارتفاع', D: 'القطر', T: 'السُمك' };
+                const cv = item.component_values as Record<string, number> | null;
+                let dims = '';
+                if (cv && Object.keys(cv).length > 0) {
+                  dims = Object.entries(cv).map(([k, v]) => `${componentLabels[k] || k}:${v}`).join(' × ');
+                } else {
+                  const parts = [
+                    item.length ? `${item.length}` : '',
+                    item.width ? `${item.width}` : '',
+                    item.height ? `${item.height}` : '',
+                  ].filter(Boolean).join(' × ');
+                  if (parts) dims = parts;
+                }
+
+                const cleanDesc = (item.description || "").trim();
+                const displayDesc = (cleanDesc === "" || cleanDesc === "-") ? "" : cleanDesc;
+                const detailText = displayDesc || dims || "---";
+
+                const cleanUnit = (item.measurement_configs?.name || item.measurement_configs?.unit_symbol || getMeasurementLabel(item.measurement_type) || "").trim();
+                const displayUnit = (cleanUnit === "" || cleanUnit === "-") ? "عدد" : cleanUnit;
+
+                return `
+                  <tr>
+                    <td style="text-align: center; font-family: 'Manrope', sans-serif;">${idx + 1}</td>
+                    <td style="text-align: right; font-weight: bold;">${item.name}</td>
+                    <td style="text-align: center;">${displayUnit}</td>
+                    <td style="text-align: right; font-size: 10pt;">${detailText}</td>
+                    <td style="text-align: center; font-family: 'Manrope', sans-serif;">${item.quantity}</td>
+                    <td style="text-align: center; font-family: 'Manrope', sans-serif;">${Number(item.unit_price).toLocaleString()}</td>
+                    <td style="text-align: center; font-family: 'Manrope', sans-serif; color: #555;">${dirhamStr}</td>
+                    <td style="text-align: center; font-family: 'Manrope', sans-serif; font-weight: bold;">${dinarStr}</td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+            <tfoot>
+              <tr style="font-weight: bold; background-color: #fafafa;">
+                <td colspan="4" style="text-align: center; font-size: 11pt;">الإجمالي</td>
+                <td style="text-align: center; font-family: 'Manrope', sans-serif;">${totalQuantitySum}</td>
+                <td style="text-align: center; font-family: 'Manrope', sans-serif;">${priceDisplay}</td>
+                <td style="text-align: center; font-family: 'Manrope', sans-serif; color: #555;">${totalDirhamsDisplay}</td>
+                <td style="text-align: center; font-family: 'Manrope', sans-serif; font-weight: bold; font-size: 11.5pt; color: #15803d;">${totalDinarsDisplay}</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <!-- Signature Section -->
+          <div style="margin-top: 25px; display: flex; justify-content: flex-start; padding-left: 20px; page-break-inside: avoid; break-inside: avoid;">
+            <div style="text-align: center; width: 220px; display: flex; flex-direction: column; align-items: center; page-break-inside: avoid; break-inside: avoid;">
+              <p style="font-weight: bold; margin-bottom: 6px; font-size: 11pt;">
+                ${engineerName}
+              </p>
+              <p style="font-weight: bold; font-size: 11pt; margin-top: 0; margin-bottom: 15px;">
+                التوقيع / .................
+              </p>
+            </div>
+          </div>
+        </div>
+      `;
+
+      if (options?.showPurchases && purchases && purchases.length > 0) {
+        const purchasesTotal = purchases.reduce((s, p) => s + Number(p.total_amount || 0), 0);
+        clientInvoiceHTML += `
+          <div style="page-break-before: always; margin-top: 30px;">
+            <h3 style="font-size: 13pt; font-weight: bold; border-bottom: 1.5px solid #000; padding-bottom: 3px; margin-bottom: 15px;">المشتريات وفواتير الخدمات التابعة للمرحلة</h3>
+            <table class="client-invoice-table">
+              <thead>
+                <tr>
+                  <th style="width: 8%;">ر.م</th>
+                  <th style="text-align: right;">المورد</th>
+                  <th style="width: 15%;">رقم الفاتورة</th>
+                  <th style="width: 18%;">التاريخ</th>
+                  <th style="width: 20%; text-align: center;">المبلغ</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${purchases.map((p: any, idx: number) => `
+                  <tr>
+                    <td style="text-align: center;">${idx + 1}</td>
+                    <td style="text-align: right;">${p.suppliers?.name || "-"}</td>
+                    <td style="text-align: center;">${p.invoice_number || "-"}</td>
+                    <td style="text-align: center;">${format(new Date(p.date), "yyyy/MM/dd")}</td>
+                    <td style="text-align: center; font-weight: bold;">${Number(p.total_amount).toLocaleString()} د.ل</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+              <tfoot>
+                <tr style="font-weight: bold; background-color: #fafafa;">
+                  <td colspan="4" style="text-align: center;">الإجمالي</td>
+                  <td style="text-align: center; color: #15803d;">${purchasesTotal.toLocaleString()} د.ل</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        `;
+      }
+
+      if (options?.showRentals && rentalPurchases && rentalPurchases.length > 0) {
+        const rentalsTotal = rentalPurchases.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+        clientInvoiceHTML += `
+          <div style="margin-top: 30px;">
+            <h3 style="font-size: 13pt; font-weight: bold; border-bottom: 1.5px solid #000; padding-bottom: 3px; margin-bottom: 15px;">إيجار المعدات والآليات</h3>
+            <table class="client-invoice-table">
+              <thead>
+                <tr>
+                  <th style="width: 8%;">ر.م</th>
+                  <th style="text-align: right;">المعدة</th>
+                  <th style="width: 18%;">البدء</th>
+                  <th style="width: 18%;">الانتهاء</th>
+                  <th style="width: 20%; text-align: center;">المبلغ</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rentalPurchases.map((r: any, idx: number) => `
+                  <tr>
+                    <td style="text-align: center;">${idx + 1}</td>
+                    <td style="text-align: right;">${r.equipment_rentals?.equipment?.name || "معدة"}</td>
+                    <td style="text-align: center;">${r.equipment_rentals?.start_date ? format(new Date(r.equipment_rentals.start_date), "yyyy/MM/dd") : "-"}</td>
+                    <td style="text-align: center;">${r.equipment_rentals?.end_date ? format(new Date(r.equipment_rentals.end_date), "yyyy/MM/dd") : "-"}</td>
+                    <td style="text-align: center; font-weight: bold;">${Number(r.total_amount).toLocaleString()} د.ل</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+              <tfoot>
+                <tr style="font-weight: bold; background-color: #fafafa;">
+                  <td colspan="4" style="text-align: center;">الإجمالي</td>
+                  <td style="text-align: center; color: #15803d;">${rentalsTotal.toLocaleString()} د.ل</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        `;
+      }
+
+      if (options?.showExpenses && expenses && expenses.length > 0) {
+        const expensesTotal = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+        clientInvoiceHTML += `
+          <div style="margin-top: 30px;">
+            <h3 style="font-size: 13pt; font-weight: bold; border-bottom: 1.5px solid #000; padding-bottom: 3px; margin-bottom: 15px;">مصروفات وتكاليف تشغيلية للمرحلة</h3>
+            <table class="client-invoice-table">
+              <thead>
+                <tr>
+                  <th style="width: 8%;">ر.م</th>
+                  <th style="text-align: right;">البيان / الوصف</th>
+                  <th style="width: 18%;">التاريخ</th>
+                  <th style="width: 20%; text-align: center;">المبلغ</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${expenses.map((e: any, idx: number) => `
+                  <tr>
+                    <td style="text-align: center;">${idx + 1}</td>
+                    <td style="text-align: right;">${e.description || "-"}</td>
+                    <td style="text-align: center;">${format(new Date(e.date), "yyyy/MM/dd")}</td>
+                    <td style="text-align: center; font-weight: bold;">${Number(e.amount).toLocaleString()} د.ل</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+              <tfoot>
+                <tr style="font-weight: bold; background-color: #fafafa;">
+                  <td colspan="3" style="text-align: center;">الإجمالي</td>
+                  <td style="text-align: center; color: #15803d;">${expensesTotal.toLocaleString()} د.ل</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        `;
+      }
+
+      const fullContent = `
+        <div class="print-area">
+          <div class="print-content" style="box-shadow: none; border: none; padding: 0; margin: 0;">
+            ${clientInvoiceHTML}
+          </div>
+        </div>
+      `;
+
+      const title = "فاتورة أعمال منجزة";
+      const cleanClientName = (project?.clients as any)?.name ? `_${(project.clients as any).name}` : "";
+      const cleanPhaseName = phase.name.replace(/\s+/g, "_");
+      const filename = `فاتورة_${cleanPhaseName}${cleanClientName}_${format(new Date(), "dd-MM-yyyy")}.pdf`;
+
+      if (action === 'print') {
+        openPrintWindow(title, fullContent, companyPrintSettings);
+      } else {
+        await savePdfViaHtml2Pdf(fullContent, filename);
+      }
+      return;
+    }
 
     // Build content using print template classes
     let sectionsHTML = '';
 
     // Header section
     sectionsHTML += `
-      <div class="print-report-header">
+      <div class="print-report-header" style="display: none;">
         <div class="print-report-title">تقرير فاتورة المرحلة</div>
         <div class="print-report-subtitle">${project?.name || ""}</div>
-        ${project?.clients?.name ? `<div class="print-report-meta">العميل: ${project.clients.name}</div>` : ""}
+        ${project?.clients?.name ? `<div class="print-report-meta">العميل: ${project.clients.name} &nbsp;|&nbsp; رقم الفاتورة (النظام): ${systemInvoiceNo} &nbsp;|&nbsp; رقم الفاتورة (المشروع): #${calculatedPhaseNo}</div>` : ""}
       </div>
     `;
 
@@ -578,12 +898,12 @@ const ProjectPhases = () => {
           <tr>
             <td class="info-label">المرحلة</td>
             <td class="info-value">${phase.name}</td>
-            <td class="info-label">رقم الفاتورة</td>
-            <td class="info-value">${phase.phase_number ? `#${phase.phase_number}` : '-'}</td>
+            <td class="info-label">رقم الفاتورة (النظام)</td>
+            <td class="info-value">${systemInvoiceNo}</td>
           </tr>
           <tr>
-            <td class="info-label">المرجع</td>
-            <td class="info-value">${phase.reference_number || '-'}</td>
+            <td class="info-label">رقم الفاتورة (المشروع)</td>
+            <td class="info-value">#${calculatedPhaseNo}</td>
             ${mode === 'company' ? `<td class="info-label">الخزينة</td>
             <td class="info-value">${treasuryName || '-'}</td>` : `<td class="info-label"></td><td class="info-value"></td>`}
           </tr>
@@ -986,21 +1306,24 @@ const ProjectPhases = () => {
             <tbody>
               <tr><td>إجمالي بنود المقاولات</td><td>${formatCurrencyLYD(totalItems)}</td></tr>
       `;
+      const projPct = project?.project_type === "finishing" ? Number((project as any).finishing_percentage || 0) : 0;
+      const phasePercentage = phase.has_percentage && phase.percentage_value > 0 ? Number(phase.percentage_value) : projPct;
+      
       let clientTotal = totalItems;
       let percentageFeeTotal = 0;
       if (options?.showPurchases) {
         clientSummaryHTML += `<tr><td>إجمالي المشتريات</td><td>${formatCurrencyLYD(totalPurch)}</td></tr>`;
         clientTotal += totalPurch;
-        if (phase.has_percentage && phase.percentage_value > 0) {
-          const fee = totalPurch * Number(phase.percentage_value) / 100;
+        if (phasePercentage > 0) {
+          const fee = totalPurch * phasePercentage / 100;
           percentageFeeTotal += fee;
         }
       }
       if (options?.showRentals) {
         clientSummaryHTML += `<tr><td>إجمالي إيجارات المعدات</td><td>${formatCurrencyLYD(totalRent)}</td></tr>`;
         clientTotal += totalRent;
-        if (phase.has_percentage && phase.percentage_value > 0) {
-          const fee = totalRent * Number(phase.percentage_value) / 100;
+        if (phasePercentage > 0) {
+          const fee = totalRent * phasePercentage / 100;
           percentageFeeTotal += fee;
         }
       }
@@ -1009,7 +1332,7 @@ const ProjectPhases = () => {
         clientTotal += totalExp;
       }
       if (percentageFeeTotal > 0) {
-        clientSummaryHTML += `<tr><td>النسبة المستحقة (${phase.percentage_value}%)</td><td>${formatCurrencyLYD(percentageFeeTotal)}</td></tr>`;
+        clientSummaryHTML += `<tr><td>النسبة المستحقة (${phasePercentage}%)</td><td>${formatCurrencyLYD(percentageFeeTotal)}</td></tr>`;
         clientTotal += percentageFeeTotal;
       }
       // المدفوع والمتبقي
@@ -1026,8 +1349,10 @@ const ProjectPhases = () => {
       sectionsHTML += clientSummaryHTML;
     } else {
       // للشركة: ملخص مالي كامل
-      const percentageFee = phase.has_percentage && phase.percentage_value > 0 
-        ? (totalPurch + totalRent) * Number(phase.percentage_value) / 100 
+      const projPct = project?.project_type === "finishing" ? Number((project as any).finishing_percentage || 0) : 0;
+      const phasePercentage = phase.has_percentage && phase.percentage_value > 0 ? Number(phase.percentage_value) : projPct;
+      const percentageFee = phasePercentage > 0 
+        ? (totalPurch + totalRent) * phasePercentage / 100 
         : 0;
       const totalCosts = totalPurch + totalExp + totalTech + totalRent;
       const netProfit = clientPaidActual - totalCosts;
@@ -1176,6 +1501,24 @@ const ProjectPhases = () => {
       percentage_value: "",
     });
   };
+  
+  const handleOpenNewPhase = () => {
+    setEditingPhase(null);
+    const projectPct = project?.project_type === "finishing" ? Number((project as any).finishing_percentage || 0) : 0;
+    setFormData({
+      name: "",
+      description: "",
+      status: "active",
+      start_date: new Date().toISOString().split("T")[0],
+      end_date: "",
+      notes: "",
+      treasury_id: (project as any)?.default_treasury_id || 
+        (project?.project_type === "contracting" ? (companySettings as any)?.contracting_treasury_id : (companySettings as any)?.finishing_treasury_id) || "",
+      has_percentage: project?.project_type === "finishing" && projectPct > 0,
+      percentage_value: projectPct > 0 ? String(projectPct) : "",
+    });
+    setDialogOpen(true);
+  };
 
   const handleEdit = (phase: Phase) => {
     setEditingPhase(phase);
@@ -1272,11 +1615,7 @@ const ProjectPhases = () => {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => navigate(`/projects/${projectId}/payments`)}>
-            <CreditCard className="h-4 w-4 ml-2" />
-            تسديدات الزبون
-          </Button>
-          <Button onClick={() => setDialogOpen(true)}>
+          <Button onClick={handleOpenNewPhase}>
             <Plus className="h-4 w-4 ml-2" />
             إضافة فاتورة مرحلة
           </Button>
@@ -1336,41 +1675,41 @@ const ProjectPhases = () => {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 text-sm">
-                  <div className="p-2.5 rounded-lg bg-primary/5 border border-primary/20">
-                    <p className="text-xs text-muted-foreground">بنود المقاولات</p>
-                    <p className="font-bold text-primary">{formatCurrencyLYD(totalItems)}</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-4 text-sm">
+                  <div className="p-3.5 rounded-xl bg-primary/5 border border-primary/10 shadow-sm transition-all hover:bg-primary/10">
+                    <p className="text-xs text-muted-foreground mb-1 font-semibold">بنود المقاولات</p>
+                    <p className="text-lg font-bold text-primary">{formatCurrencyLYD(totalItems)}</p>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-muted/50 border border-border">
-                    <p className="text-xs text-muted-foreground">المشتريات</p>
-                    <p className="font-bold">{formatCurrencyLYD(totalPurchases)}</p>
+                  <div className="p-3.5 rounded-xl bg-muted/40 border border-border shadow-sm transition-all hover:bg-muted/60">
+                    <p className="text-xs text-muted-foreground mb-1 font-semibold">المشتريات</p>
+                    <p className="text-lg font-bold text-foreground">{formatCurrencyLYD(totalPurchases)}</p>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-muted/50 border border-border">
-                    <p className="text-xs text-muted-foreground">المصروفات</p>
-                    <p className="font-bold">{formatCurrencyLYD(totalExpenses)}</p>
+                  <div className="p-3.5 rounded-xl bg-muted/40 border border-border shadow-sm transition-all hover:bg-muted/60">
+                    <p className="text-xs text-muted-foreground mb-1 font-semibold">المصروفات</p>
+                    <p className="text-lg font-bold text-foreground">{formatCurrencyLYD(totalExpenses)}</p>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-muted/50 border border-border">
-                    <p className="text-xs text-muted-foreground">العمالة</p>
-                    <p className="font-bold">{formatCurrencyLYD(totalLabor)}</p>
+                  <div className="p-3.5 rounded-xl bg-muted/40 border border-border shadow-sm transition-all hover:bg-muted/60">
+                    <p className="text-xs text-muted-foreground mb-1 font-semibold">العمالة</p>
+                    <p className="text-lg font-bold text-foreground">{formatCurrencyLYD(totalLabor)}</p>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-muted/50 border border-border">
-                    <p className="text-xs text-muted-foreground">الإيجارات</p>
-                    <p className="font-bold">{formatCurrencyLYD(totalRentals)}</p>
+                  <div className="p-3.5 rounded-xl bg-muted/40 border border-border shadow-sm transition-all hover:bg-muted/60">
+                    <p className="text-xs text-muted-foreground mb-1 font-semibold">الإيجارات</p>
+                    <p className="text-lg font-bold text-foreground">{formatCurrencyLYD(totalRentals)}</p>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-green-500/5 border border-green-500/20">
-                    <p className="text-xs text-muted-foreground">تسديد الزبون</p>
-                    <p className="font-bold text-green-600">{formatCurrencyLYD(totalClientPaid)}</p>
+                  <div className="p-3.5 rounded-xl bg-emerald-500/5 border border-emerald-500/10 shadow-sm transition-all hover:bg-emerald-500/10">
+                    <p className="text-xs text-emerald-700 dark:text-emerald-400 mb-1 font-semibold">تسديد الزبون</p>
+                    <p className="text-lg font-bold text-emerald-600">{formatCurrencyLYD(totalClientPaid)}</p>
                     {unallocatedAmount > 0 && (
-                      <p className="text-[10px] text-yellow-600 dark:text-yellow-400 mt-0.5 font-medium">
+                      <p className="text-[10px] text-yellow-600 dark:text-yellow-400 mt-1 font-medium bg-yellow-500/10 px-1.5 py-0.5 rounded inline-block">
                         غير مخصص: {formatCurrencyLYD(unallocatedAmount)}
                       </p>
                     )}
                   </div>
-                  <div className={`p-2.5 rounded-lg border ${expectedProfit >= 0 ? 'bg-green-500/5 border-green-500/20' : 'bg-destructive/5 border-destructive/20'}`}>
-                    <p className="text-xs text-muted-foreground">صافي الربح</p>
-                    <p className={`font-bold ${expectedProfit >= 0 ? 'text-green-600' : 'text-destructive'}`}>{formatCurrencyLYD(expectedProfit)}</p>
+                  <div className={`p-3.5 rounded-xl border shadow-sm transition-all ${expectedProfit >= 0 ? 'bg-emerald-500/5 border-emerald-500/10 hover:bg-emerald-500/10' : 'bg-destructive/5 border-destructive/10 hover:bg-destructive/10'}`}>
+                    <p className="text-xs text-muted-foreground mb-1 font-semibold">صافي الربح</p>
+                    <p className={`text-lg font-bold ${expectedProfit >= 0 ? 'text-emerald-600' : 'text-destructive'}`}>{formatCurrencyLYD(expectedProfit)}</p>
                     {totalClientPaid > 0 && (
-                      <p className={`text-xs ${realizedProfit >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                      <p className={`text-xs mt-1 font-medium ${realizedProfit >= 0 ? 'text-primary' : 'text-destructive'}`}>
                         محقق: {formatCurrencyLYD(realizedProfit)}
                       </p>
                     )}
@@ -1400,15 +1739,16 @@ const ProjectPhases = () => {
             <p className="text-muted-foreground mb-4">
               ابدأ بإضافة فاتورة مرحلة جديدة للمشروع
             </p>
-            <Button onClick={() => setDialogOpen(true)}>
+            <Button onClick={handleOpenNewPhase}>
               <Plus className="h-4 w-4 ml-2" />
               إضافة فاتورة مرحلة
             </Button>
           </Card>
         ) : (
-          phases?.map((phase) => {
+          phases?.map((phase, idx) => {
             const summary = phaseSummaries?.[phase.id];
             const isExpanded = expandedPhases.has(phase.id);
+            const phaseNo = phase.phase_number || (idx + 1);
             
             return (
               <Collapsible
@@ -1428,11 +1768,9 @@ const ProjectPhases = () => {
                         )}
                         <div className="text-right flex-1">
                           <div className="flex items-center gap-3 w-full">
-                            {phase.phase_number && (
-                              <Badge variant="outline" className="text-sm font-bold px-3 py-1">فاتورة #{phase.phase_number}</Badge>
-                            )}
+                            <Badge variant="outline" className="text-sm font-bold px-3 py-1">فاتورة #{phaseNo}</Badge>
                             {phase.reference_number && (
-                              <Badge variant="secondary" className="text-sm font-mono font-bold px-3 py-1">{phase.reference_number}</Badge>
+                              <Badge variant="secondary" className="text-sm font-bold px-3 py-1">{phase.reference_number}</Badge>
                             )}
                             <h3 className="font-semibold">{phase.name}</h3>
                           </div>
@@ -1443,10 +1781,11 @@ const ProjectPhases = () => {
                               </p>
                             )}
                             {phase.treasury_id && treasuries && (
-                              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                                <Wallet className="h-3 w-3" />
-                                {treasuries.find(t => t.id === phase.treasury_id)?.name}
-                              </span>
+                              <Badge variant="outline" className="text-xs border-[#d6ac40]/40 bg-[#d6ac40]/5 text-[#b8860b] dark:text-[#d6ac40] flex items-center gap-1 py-0.5 px-2">
+                                <Wallet className="h-3.5 w-3.5 text-[#d6ac40]" />
+                                <span className="font-semibold">الخزينة المرتبطة:</span>
+                                <span>{treasuries.find(t => t.id === phase.treasury_id)?.name}</span>
+                              </Badge>
                             )}
                           </div>
                         </div>
@@ -1520,204 +1859,183 @@ const ProjectPhases = () => {
                   </CardHeader>
                   
                   <CollapsibleContent>
-                    <CardContent className="pt-0">
-                      {/* Summary Cards */}
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 mb-4">
-                        {/* فاتورة بنود المقاولات */}
-                        <Card className="bg-primary/5 border-primary/20">
-                          <CardContent className="p-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className="p-1.5 bg-primary/10 rounded-md">
-                                <Package className="h-4 w-4 text-primary" />
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground">بنود المقاولات</p>
-                                <p className="text-sm font-bold">{summary?.itemsCount || 0}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {formatCurrencyLYD(summary?.itemsTotal || 0)}
-                                </p>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                        
-                        {/* فواتير الخدمات والمشتريات */}
-                        <Card className="bg-primary/5 border-primary/20">
-                          <CardContent className="p-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className="p-1.5 bg-primary/10 rounded-md">
-                                <ShoppingCart className="h-4 w-4 text-primary" />
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground">المشتريات</p>
-                                <p className="text-sm font-bold">{summary?.purchasesCount || 0}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {formatCurrencyLYD(summary?.purchasesTotal || 0)}
-                                </p>
-                                {phase.has_percentage && phase.percentage_value > 0 && (
-                                  <>
-                                    <p className="text-xs text-primary font-medium">
-                                      النسبة: {formatCurrencyLYD((summary?.purchasesTotal || 0) * phase.percentage_value / 100)} ({phase.percentage_value}%)
-                                    </p>
-                                    <p className="text-xs text-primary font-bold">
-                                      المستحق: {formatCurrencyLYD((summary?.purchasesTotal || 0) + (summary?.purchasesTotal || 0) * phase.percentage_value / 100)}
-                                    </p>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        {/* إيجارات المعدات */}
-                        <Card className="bg-primary/5 border-primary/20">
-                          <CardContent className="p-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className="p-1.5 bg-primary/10 rounded-md">
-                                <Wrench className="h-4 w-4 text-primary" />
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground">إيجارات المعدات</p>
-                                <p className="text-sm font-bold">{summary?.rentalsCount || 0}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {formatCurrencyLYD(summary?.rentalsTotal || 0)}
-                                </p>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        {/* تكاليف العمالة */}
-                        <Card className="bg-primary/5 border-primary/20">
-                          <CardContent className="p-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className="p-1.5 bg-primary/10 rounded-md">
-                                <Layers className="h-4 w-4 text-primary" />
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground">تكاليف العمالة</p>
-                                <p className="text-sm font-bold">
-                                  {formatCurrencyLYD(summary?.techniciansCost || 0)}
-                                </p>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                        
-                        {/* المصروفات */}
-                        <Card className="bg-primary/5 border-primary/20">
-                          <CardContent className="p-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className="p-1.5 bg-primary/10 rounded-md">
-                                <Coins className="h-4 w-4 text-primary" />
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground">المصروفات</p>
-                                <p className="text-sm font-bold">{summary?.expensesCount || 0}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {formatCurrencyLYD(summary?.expensesTotal || 0)}
-                                </p>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        {/* المدفوع من الزبون والمتبقي */}
-                        {(() => {
-                          // ما دفعه الزبون فعلاً من خلال تخصيصات الدفع
-                          // إذا كان المشروع يحتوي على مرحلة واحدة فقط، نعتبر إجمالي مدفوعات المشروع مدفوعة لهذه المرحلة
-                          const clientPaid = phases?.length === 1
-                            ? totalClientPaid
-                            : (summary?.clientPaid || 0);
-                          const itemsTotal = summary?.itemsTotal || 0;
-                          const pct = phase.has_percentage && phase.percentage_value > 0 ? Number(phase.percentage_value) : 0;
-                          const purchTotal = summary?.purchasesTotal || 0;
-                          // إجمالي المستحق على الزبون = بنود المقاولات + مشتريات + نسبة الشركة على المشتريات
-                          const totalDue = itemsTotal + purchTotal * (1 + pct / 100);
-                          const remaining = totalDue - clientPaid;
-                          return (
-                            <Card className="border bg-muted/30">
+                    <CardContent className="pt-0 pb-4">
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5" dir="rtl">
+                        {/* Left/Main Column: Operational Details (2/3 width) */}
+                        <div className="lg:col-span-2 space-y-3">
+                          <h4 className="text-xs font-bold text-primary/80 mb-1.5 mr-1 border-r-2 border-primary/50 pr-2">البنود والتكاليف التشغيلية</h4>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            {/* بنود المقاولات */}
+                            <Card className="bg-primary/5 border-primary/10 shadow-sm transition-all hover:bg-primary/10">
                               <CardContent className="p-3">
                                 <div className="flex items-center gap-2.5">
-                                  <div className="p-1.5 rounded-md bg-primary/10">
-                                    <CreditCard className="h-4 w-4 text-primary" />
+                                  <div className="p-1.5 bg-primary/10 rounded-md">
+                                    <Package className="h-4 w-4 text-primary" />
                                   </div>
                                   <div>
-                                    <p className="text-xs text-muted-foreground">المدفوع من الزبون</p>
-                                    <p className="text-sm font-bold text-green-600">{formatCurrencyLYD(clientPaid)}</p>
-                                    <p className="text-xs text-muted-foreground">المستحق: {formatCurrencyLYD(totalDue)}</p>
-                                    <p className={`text-xs font-medium ${remaining > 0 ? 'text-destructive' : 'text-green-600'}`}>
-                                      المتبقي: {formatCurrencyLYD(Math.abs(remaining))}{remaining <= 0 ? ' ✓' : ''}
+                                    <p className="text-xs text-muted-foreground mb-0.5">بنود المقاولات</p>
+                                    <p className="text-sm font-bold text-primary">
+                                      {formatCurrencyLYD(summary?.itemsTotal || 0)}
                                     </p>
+                                    <p className="text-[10px] text-muted-foreground font-semibold">عدد البنود: {summary?.itemsCount || 0}</p>
                                   </div>
                                 </div>
                               </CardContent>
                             </Card>
-                          );
-                        })()}
-
-                        {/* صافي الربح المتوقع */}
-                        {(() => {
-                          // التكاليف الفعلية على الشركة
-                          const totalCosts = (summary?.purchasesTotal || 0) + (summary?.expensesTotal || 0) + (summary?.techniciansCost || 0) + (summary?.rentalsTotal || 0);
-                          // إيرادات المرحلة = قيمة البنود + نسبة الشركة على المشتريات
-                          const pct = phase.has_percentage && phase.percentage_value > 0 ? Number(phase.percentage_value) : 0;
-                          const itemsRevenue = summary?.itemsTotal || 0;
-                          const purchasesCommission = pct > 0 ? (summary?.purchasesTotal || 0) * pct / 100 : 0;
-                          const totalRevenue = itemsRevenue + purchasesCommission;
-                          // صافي الربح = الإيرادات المتوقعة - التكاليف الفعلية
-                          const netProfit = totalRevenue - totalCosts;
-                          // ما دفعه الزبون فعلياً
-                          const clientPaidForProfit = phases?.length === 1 ? totalClientPaid : (summary?.clientPaid || 0);
-                          // الربح الفعلي المحقق = ما دُفع فعلاً - التكاليف
-                          const realizedProfit = clientPaidForProfit - totalCosts;
-                          const showRealized = clientPaidForProfit > 0;
-                          return (
-                            <Card className={`border ${netProfit >= 0 ? 'bg-green-500/5 border-green-500/20' : 'bg-destructive/5 border-destructive/20'}`}>
+                            
+                            {/* فواتير الخدمات والمشتريات */}
+                            <Card className="bg-muted/40 border-border shadow-sm transition-all hover:bg-muted/60">
                               <CardContent className="p-3">
                                 <div className="flex items-center gap-2.5">
-                                  <div className={`p-1.5 rounded-md ${netProfit >= 0 ? 'bg-green-500/10' : 'bg-destructive/10'}`}>
-                                    <TrendingUp className={`h-4 w-4 ${netProfit >= 0 ? 'text-green-500' : 'text-destructive'}`} />
+                                  <div className="p-1.5 bg-muted rounded-md">
+                                    <ShoppingCart className="h-4 w-4 text-foreground" />
                                   </div>
                                   <div>
-                                    <p className="text-xs text-muted-foreground">صافي الربح المتوقع</p>
-                                    <p className={`text-sm font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-destructive'}`}>
-                                      {formatCurrencyLYD(netProfit)}
+                                    <p className="text-xs text-muted-foreground mb-0.5">المشتريات والخدمات</p>
+                                    <p className="text-sm font-bold">
+                                      {formatCurrencyLYD(summary?.purchasesTotal || 0)}
                                     </p>
-                                    {showRealized && (
-                                      <p className={`text-xs font-medium ${realizedProfit >= 0 ? 'text-primary' : 'text-destructive'}`}>
-                                        المحقق: {formatCurrencyLYD(realizedProfit)}
+                                    {phase.has_percentage && phase.percentage_value > 0 ? (
+                                      <p className="text-[10px] text-primary font-semibold block">
+                                        الربح (+{phase.percentage_value}%): {formatCurrencyLYD((summary?.purchasesTotal || 0) * phase.percentage_value / 100)}
                                       </p>
+                                    ) : (
+                                      <p className="text-[10px] text-muted-foreground font-semibold block">الفواتير: {summary?.purchasesCount || 0}</p>
                                     )}
                                   </div>
                                 </div>
                               </CardContent>
                             </Card>
-                          );
-                        })()}
 
-                        {/* صافي ربح/خسارة الإيجارات */}
-                        {(() => {
-                          const rentalProfit = (summary?.rentalsTotal || 0);
-                          
-                          return (
-                            <Card className={`border ${rentalProfit === 0 ? 'bg-muted/50 border-border' : 'bg-destructive/5 border-destructive/20'}`}>
+                            {/* تكاليف العمالة */}
+                            <Card className="bg-muted/40 border-border shadow-sm transition-all hover:bg-muted/60">
                               <CardContent className="p-3">
                                 <div className="flex items-center gap-2.5">
-                                  <div className={`p-1.5 rounded-md ${rentalProfit === 0 ? 'bg-muted' : 'bg-destructive/10'}`}>
-                                    <TrendingDown className={`h-4 w-4 ${rentalProfit === 0 ? 'text-muted-foreground' : 'text-destructive'}`} />
+                                  <div className="p-1.5 bg-muted rounded-md">
+                                    <Layers className="h-4 w-4 text-foreground" />
                                   </div>
                                   <div>
-                                    <p className="text-xs text-muted-foreground">تكلفة الإيجارات</p>
-                                    <p className={`text-sm font-bold ${rentalProfit === 0 ? 'text-muted-foreground' : 'text-destructive'}`}>
-                                      {formatCurrencyLYD(rentalProfit)}
+                                    <p className="text-xs text-muted-foreground mb-0.5">تكاليف العمالة</p>
+                                    <p className="text-sm font-bold">
+                                      {formatCurrencyLYD(summary?.techniciansCost || 0)}
                                     </p>
+                                    <p className="text-[10px] text-muted-foreground font-semibold">يوميات وإنجاز</p>
                                   </div>
                                 </div>
                               </CardContent>
                             </Card>
-                          );
-                        })()}
+
+                            {/* إيجارات المعدات */}
+                            <Card className="bg-muted/40 border-border shadow-sm transition-all hover:bg-muted/60">
+                              <CardContent className="p-3">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="p-1.5 bg-muted rounded-md">
+                                    <Wrench className="h-4 w-4 text-foreground" />
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-muted-foreground mb-0.5">إيجارات المعدات</p>
+                                    <p className="text-sm font-bold">
+                                      {formatCurrencyLYD(summary?.rentalsTotal || 0)}
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground font-semibold">المعدات: {summary?.rentalsCount || 0}</p>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                            
+                            {/* المصروفات */}
+                            <Card className="bg-muted/40 border-border shadow-sm transition-all hover:bg-muted/60">
+                              <CardContent className="p-3">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="p-1.5 bg-muted rounded-md">
+                                    <Coins className="h-4 w-4 text-foreground" />
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-muted-foreground mb-0.5">المصروفات النثرية</p>
+                                    <p className="text-sm font-bold">
+                                      {formatCurrencyLYD(summary?.expensesTotal || 0)}
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground font-semibold">المصروفات: {summary?.expensesCount || 0}</p>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </div>
+                        </div>
+
+                        {/* Right Column: Profitability & Client details (1/3 width) */}
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-bold text-emerald-600 mb-1.5 mr-1 border-r-2 border-emerald-500 pr-2">ملخص الزبون والربحية</h4>
+                          <div className="grid grid-cols-1 gap-3">
+                            {/* المدفوع من الزبون والمتبقي */}
+                            {(() => {
+                              const clientPaid = phases?.length === 1 ? totalClientPaid : (summary?.clientPaid || 0);
+                              const itemsTotal = summary?.itemsTotal || 0;
+                              const projectPct = project?.project_type === "finishing" ? Number((project as any).finishing_percentage || 0) : 0;
+                              const pct = phase.has_percentage && phase.percentage_value > 0 ? Number(phase.percentage_value) : projectPct;
+                              const purchTotal = summary?.purchasesTotal || 0;
+                              const totalDue = itemsTotal + purchTotal * (1 + pct / 100);
+                              const remaining = totalDue - clientPaid;
+                              return (
+                                <Card className="border bg-emerald-500/[0.02] border-emerald-500/10 shadow-sm">
+                                  <CardContent className="p-3">
+                                    <div className="flex items-center gap-2.5">
+                                      <div className="p-1.5 rounded-md bg-emerald-500/10 text-emerald-600">
+                                        <CreditCard className="h-4 w-4" />
+                                      </div>
+                                      <div className="flex-1">
+                                        <p className="text-xs text-muted-foreground mb-0.5">تسديدات الزبون للمرحلة</p>
+                                        <p className="text-sm font-bold text-emerald-600">{formatCurrencyLYD(clientPaid)}</p>
+                                        <div className="flex justify-between text-[10px] text-muted-foreground font-semibold mt-1 pt-1 border-t border-border/40">
+                                          <span>المستحق: {formatCurrencyLYD(totalDue)}</span>
+                                          <span className={remaining > 0 ? 'text-destructive font-bold' : 'text-emerald-600 font-bold'}>
+                                            المتبقي: {formatCurrencyLYD(Math.abs(remaining))}{remaining <= 0 ? ' ✓' : ''}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              );
+                            })()}
+
+                            {/* صافي الربح المتوقع */}
+                            {(() => {
+                              const totalCosts = (summary?.purchasesTotal || 0) + (summary?.expensesTotal || 0) + (summary?.techniciansCost || 0) + (summary?.rentalsTotal || 0);
+                              const projectPct = project?.project_type === "finishing" ? Number((project as any).finishing_percentage || 0) : 0;
+                              const pct = phase.has_percentage && phase.percentage_value > 0 ? Number(phase.percentage_value) : projectPct;
+                              const itemsRevenue = summary?.itemsTotal || 0;
+                              const purchasesCommission = pct > 0 ? (summary?.purchasesTotal || 0) * pct / 100 : 0;
+                              const totalRevenue = itemsRevenue + purchasesCommission;
+                              const netProfit = totalRevenue - totalCosts;
+                              const clientPaidForProfit = phases?.length === 1 ? totalClientPaid : (summary?.clientPaid || 0);
+                              const realizedProfit = clientPaidForProfit - totalCosts;
+                              const showRealized = clientPaidForProfit > 0;
+                              return (
+                                <Card className={`border shadow-sm ${netProfit >= 0 ? 'bg-emerald-500/5 border-emerald-500/10' : 'bg-destructive/5 border-destructive/10'}`}>
+                                  <CardContent className="p-3">
+                                    <div className="flex items-center gap-2.5">
+                                      <div className={`p-1.5 rounded-md ${netProfit >= 0 ? 'bg-emerald-500/10 text-emerald-600' : 'bg-destructive/10 text-destructive'}`}>
+                                        <TrendingUp className="h-4 w-4" />
+                                      </div>
+                                      <div className="flex-1">
+                                        <p className="text-xs text-muted-foreground mb-0.5 font-semibold">صافي ربح المرحلة</p>
+                                        <p className={`text-sm font-bold ${netProfit >= 0 ? 'text-emerald-600' : 'text-destructive'}`}>
+                                          {formatCurrencyLYD(netProfit)}
+                                        </p>
+                                        {showRealized && (
+                                          <p className={`text-[10px] font-bold mt-1 pt-1 border-t border-border/40 ${realizedProfit >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                                            الربح الفعلي المحقق: {formatCurrencyLYD(realizedProfit)}
+                                          </p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              );
+                            })()}
+                          </div>
+                        </div>
                       </div>
                       
                       {/* Action Buttons */}
@@ -1901,8 +2219,9 @@ const ProjectPhases = () => {
               <Select
                 value={formData.treasury_id || "__none__"}
                 onValueChange={(val) => setFormData({ ...formData, treasury_id: val === "__none__" ? "" : val })}
+                disabled={true}
               >
-                <SelectTrigger>
+                <SelectTrigger className="bg-muted text-muted-foreground opacity-80 cursor-not-allowed">
                   <SelectValue placeholder="اختر الخزينة" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1916,6 +2235,7 @@ const ProjectPhases = () => {
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">يتم ربط الخزينة تلقائياً بناءً على إعدادات المشروع العامة</p>
             </div>
 
             {/* Percentage Settings */}
@@ -1931,8 +2251,13 @@ const ProjectPhases = () => {
                     type="button"
                     role="switch"
                     aria-checked={formData.has_percentage}
-                    className={`peer inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${formData.has_percentage ? 'bg-primary' : 'bg-input'}`}
-                    onClick={() => setFormData({ ...formData, has_percentage: !formData.has_percentage })}
+                    className={`peer inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${formData.has_percentage ? 'bg-primary' : 'bg-input'} ${project?.project_type === 'finishing' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    onClick={() => {
+                      if (project?.project_type !== 'finishing') {
+                        setFormData({ ...formData, has_percentage: !formData.has_percentage });
+                      }
+                    }}
+                    disabled={project?.project_type === 'finishing'}
                   >
                     <span className={`pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform ${formData.has_percentage ? 'translate-x-5' : 'translate-x-0'}`} />
                   </button>
@@ -1950,7 +2275,12 @@ const ProjectPhases = () => {
                     value={formData.percentage_value}
                     onChange={(e) => setFormData({ ...formData, percentage_value: e.target.value })}
                     placeholder="مثال: 15"
+                    disabled={project?.project_type === 'finishing'}
+                    className={project?.project_type === 'finishing' ? 'bg-muted text-muted-foreground cursor-not-allowed font-bold' : 'font-bold'}
                   />
+                  {project?.project_type === 'finishing' && (
+                    <p className="text-xs text-amber-600 dark:text-amber-500">تم تثبيت النسبة تلقائياً من إعدادات المشروع العامة</p>
+                  )}
                 </div>
               )}
             </div>

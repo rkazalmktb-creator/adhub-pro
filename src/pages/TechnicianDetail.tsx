@@ -29,7 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowRight, Phone, Mail, Wrench, Briefcase, DollarSign, Calendar, Plus, Trash2, Filter, X, Wallet, TrendingUp, CreditCard, Printer } from "lucide-react";
+import { ArrowRight, Phone, Mail, Wrench, Briefcase, DollarSign, Calendar, Plus, Trash2, Filter, X, Wallet, TrendingUp, CreditCard, Printer, Coins } from "lucide-react";
 import { formatCurrencyLYD } from "@/lib/currency";
 import { generatePrintStyles, getPrintValues } from "@/lib/printStyles";
 import { format } from "date-fns";
@@ -66,6 +66,17 @@ const TechnicianDetail = () => {
     notes: "",
   });
 
+  const [payDialogOpen, setPayDialogOpen] = useState(false);
+  const [selectedPurchaseForPay, setSelectedPurchaseForPay] = useState<any>(null);
+  const [payFormData, setPayFormData] = useState({
+    amount: "",
+    date: new Date().toISOString().split("T")[0],
+    payment_method: "cash",
+    treasury_id: "",
+    commission: "",
+    notes: "",
+  });
+
   // Fetch company settings for printing
   const { data: companySettings } = useQuery({
     queryKey: ["company-settings"],
@@ -88,8 +99,8 @@ const TechnicianDetail = () => {
       amount: Number(exp.amount || 0),
       paidToOrBy: technician?.name || "الفني",
       description: exp.description || `صرف مستحقات فني لدفعة عمل`,
-      projectName: exp.project?.name || undefined,
-      notes: exp.notes || undefined,
+      projectName: exp.project?.name || (exp.projectName !== "—" ? exp.projectName : undefined),
+      notes: exp.notes || exp.rawObj?.notes || undefined,
     }, companySettings);
   };
 
@@ -144,6 +155,136 @@ const TechnicianDetail = () => {
     },
     enabled: !!id,
   });
+
+  // Fetch active treasuries for payment dialog
+  const { data: treasuries } = useQuery({
+    queryKey: ["treasuries-active"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("treasuries")
+        .select("*")
+        .eq("is_active", true)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Fetch purchases linked to this technician (labor bills/invoices)
+  const { data: purchases, isLoading: purchasesLoading } = useQuery({
+    queryKey: ["technician-purchases", id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("purchases")
+        .select(`
+          *,
+          projects (
+            id,
+            name,
+            project_type,
+            client_id,
+            clients (
+              id,
+              name,
+              phone
+            )
+          )
+        `)
+        .eq("technician_id", id!)
+        .order("date", { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+    enabled: !!id,
+  });
+
+  // Fetch purchase payments linked to this technician
+  const { data: purchasePayments, isLoading: purchasePaymentsLoading } = useQuery({
+    queryKey: ["technician-purchase-payments", id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("purchase_payments")
+        .select(`
+          *,
+          purchases!inner (
+            id,
+            title,
+            notes,
+            invoice_number,
+            technician_id,
+            projects (
+              id,
+              name,
+              clients (id, name)
+            )
+          ),
+          treasuries (id, name)
+        `)
+        .eq("purchases.technician_id", id!)
+        .order("date", { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+    enabled: !!id,
+  });
+
+  const payMutation = useMutation({
+    mutationFn: async (data: typeof payFormData) => {
+      if (!selectedPurchaseForPay) return;
+      const { error } = await supabase
+        .from("purchase_payments")
+        .insert({
+          purchase_id: selectedPurchaseForPay.id,
+          amount: parseFloat(data.amount),
+          date: data.date,
+          payment_method: data.payment_method,
+          treasury_id: data.treasury_id,
+          commission: parseFloat(data.commission) || 0,
+          notes: data.notes || null,
+        });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["technician-purchases", id] });
+      queryClient.invalidateQueries({ queryKey: ["technician-purchase-payments", id] });
+      queryClient.invalidateQueries({ queryKey: ["treasury_transactions"] });
+      toast.success("تم تسجيل الدفعة بنجاح ✨");
+      setPayDialogOpen(false);
+      setPayFormData({
+        amount: "",
+        date: new Date().toISOString().split("T")[0],
+        payment_method: "cash",
+        treasury_id: "",
+        commission: "",
+        notes: "",
+      });
+    },
+    onError: (error) => {
+      toast.error("خطأ أثناء تسجيل الدفعة: " + error.message);
+    }
+  });
+
+  const handleOpenPayDialog = (purchase: any) => {
+    setSelectedPurchaseForPay(purchase);
+    const remaining = Number(purchase.total_amount) - Number(purchase.paid_amount || 0);
+    
+    const isFinishing = purchase.projects?.project_type === "finishing";
+    const targetParentId = isFinishing 
+      ? companySettings?.finishing_treasury_id 
+      : companySettings?.contracting_treasury_id;
+      
+    const defaultTreasury = treasuries?.find((t: any) => t.parent_id === targetParentId || t.id === targetParentId);
+    
+    setPayFormData({
+      amount: remaining.toString(),
+      date: new Date().toISOString().split("T")[0],
+      payment_method: "cash",
+      treasury_id: defaultTreasury?.id || purchase.treasury_id || "",
+      commission: "",
+      notes: "",
+    });
+    setPayDialogOpen(true);
+  };
 
   const { data: progressRecords } = useQuery({
     queryKey: ["technician-progress-records", id],
@@ -316,6 +457,43 @@ const TechnicianDetail = () => {
     },
   });
 
+  const deleteExpenseMutation = useMutation({
+    mutationFn: async (expenseId: string) => {
+      const { error } = await supabase
+        .from("expenses")
+        .delete()
+        .eq("id", expenseId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["technician-expenses", id] });
+      queryClient.invalidateQueries({ queryKey: ["treasury_transactions"] });
+      toast.success("تم حذف السحب وإعادة الرصيد للخزينة بنجاح 🗑️");
+    },
+    onError: (error: any) => {
+      toast.error("خطأ أثناء حذف السحب: " + error.message);
+    }
+  });
+
+  const deletePurchasePaymentMutation = useMutation({
+    mutationFn: async (paymentId: string) => {
+      const { error } = await supabase
+        .from("purchase_payments")
+        .delete()
+        .eq("id", paymentId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["technician-purchases", id] });
+      queryClient.invalidateQueries({ queryKey: ["technician-purchase-payments", id] });
+      queryClient.invalidateQueries({ queryKey: ["treasury_transactions"] });
+      toast.success("تم حذف الدفعة وإعادة الرصيد للخزينة بنجاح 🗑️");
+    },
+    onError: (error: any) => {
+      toast.error("خطأ أثناء حذف الدفعة: " + error.message);
+    }
+  });
+
   const handleWithdrawal = () => {
     if (!withdrawalForm.amount || parseFloat(withdrawalForm.amount) <= 0) {
       toast.error("يرجى إدخال مبلغ صحيح");
@@ -385,6 +563,43 @@ const TechnicianDetail = () => {
     });
     return Array.from(itemsMap.entries()).map(([id, name]) => ({ id, name }));
   }, [progressRecords]);
+
+  const combinedPayments = useMemo(() => {
+    const list: any[] = [];
+    
+    // 1. Add direct expenses
+    expenses?.forEach(exp => {
+      list.push({
+        id: exp.id,
+        date: exp.date,
+        sourceType: "expense",
+        description: exp.description || "صرف مستحقات فني لدفعة عمل",
+        projectName: exp.project?.name || "—",
+        treasuryName: "—",
+        paymentMethod: "cash",
+        amount: Number(exp.amount),
+        rawObj: exp
+      });
+    });
+    
+    // 2. Add purchase payments
+    purchasePayments?.forEach(pay => {
+      list.push({
+        id: pay.id,
+        date: pay.date,
+        sourceType: "purchase_payment",
+        description: pay.purchases?.title || pay.purchases?.notes || "دفعة فاتورة عمالة",
+        projectName: pay.purchases?.projects?.name || "—",
+        treasuryName: pay.treasuries?.name || "—",
+        paymentMethod: pay.payment_method === "cash" ? "نقداً" : "صك بنكي",
+        amount: Number(pay.amount),
+        rawObj: pay
+      });
+    });
+    
+    // Sort descending by date
+    return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [expenses, purchasePayments]);
 
   // Filtered progress records
   const filteredProgressRecords = useMemo(() => {
@@ -1125,45 +1340,144 @@ const TechnicianDetail = () => {
         </CardContent>
       </Card>
 
-      {/* Expenses/Earnings Table */}
+      {/* 1. Labor Invoices / Purchases Card */}
       <Card>
-        <CardHeader>
-          <CardTitle>سجل المدفوعات</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>اليوميات وفواتير العمل المستحقة (العقود واليوميات)</CardTitle>
+          <Badge variant="outline">{purchases?.length || 0} فاتورة عمل</Badge>
         </CardHeader>
         <CardContent>
-          {expenses && expenses.length > 0 ? (
+          {purchases && purchases.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-right">التاريخ</TableHead>
-                  <TableHead className="text-right">الوصف</TableHead>
+                  <TableHead className="text-right">الوصف / البيان</TableHead>
                   <TableHead className="text-right">المشروع</TableHead>
-                  <TableHead className="text-right">المبلغ</TableHead>
+                  <TableHead className="text-right">القيمة المستحقة</TableHead>
+                  <TableHead className="text-right">المدفوع</TableHead>
+                  <TableHead className="text-right">المتبقي</TableHead>
+                  <TableHead className="text-right">حالة السداد</TableHead>
                   <TableHead className="text-center w-[80px]">إجراءات</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {expenses.map((expense) => (
-                  <TableRow key={expense.id}>
+                {purchases.map((purchase) => {
+                  const remaining = Number(purchase.total_amount) - Number(purchase.paid_amount || 0);
+                  const statusLabels: Record<string, string> = {
+                    paid: "مدفوع بالكامل",
+                    due: "مستحق",
+                    partial: "مدفوع جزئياً",
+                  };
+                  const statusColors: Record<string, string> = {
+                    paid: "bg-green-500/10 text-green-500",
+                    due: "bg-red-500/10 text-red-500",
+                    partial: "bg-yellow-500/10 text-yellow-500",
+                  };
+                  return (
+                    <TableRow key={purchase.id}>
+                      <TableCell>{new Date(purchase.date).toLocaleDateString("ar-LY")}</TableCell>
+                      <TableCell className="font-semibold">{purchase.title || purchase.notes || "يومية/فاتورة عمل"}</TableCell>
+                      <TableCell>{purchase.projects?.name || "—"}</TableCell>
+                      <TableCell className="font-bold">{formatCurrencyLYD(purchase.total_amount)}</TableCell>
+                      <TableCell className="text-emerald-600 font-semibold">{formatCurrencyLYD(purchase.paid_amount || 0)}</TableCell>
+                      <TableCell className={`font-bold ${remaining > 0.01 ? 'text-destructive font-black' : 'text-muted-foreground'}`}>{formatCurrencyLYD(remaining)}</TableCell>
+                      <TableCell>
+                        <Badge className={statusColors[purchase.status || "due"]}>
+                          {statusLabels[purchase.status || "due"]}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {purchase.status !== "paid" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleOpenPayDialog(purchase)}
+                            title="تسجيل دفعة للفني"
+                            className="cursor-pointer"
+                          >
+                            <Coins className="h-4 w-4 text-emerald-600" />
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              لا توجد فواتير عمل أو يوميات مسجلة لهذا الفني بعد.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 2. Received Payments Log Card */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>سجل المدفوعات المستلمة كاملة (المسحوبات والدفعات)</CardTitle>
+          <Badge variant="outline">{combinedPayments.length} حركة دفع</Badge>
+        </CardHeader>
+        <CardContent>
+          {combinedPayments.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-right">التاريخ</TableHead>
+                  <TableHead className="text-right">الوصف / البيان</TableHead>
+                  <TableHead className="text-right">المشروع</TableHead>
+                  <TableHead className="text-right">الخزينة المصدر</TableHead>
+                  <TableHead className="text-right">طريقة الدفع</TableHead>
+                  <TableHead className="text-right">المبلغ المدفوع</TableHead>
+                  <TableHead className="text-center w-[120px]">الإجراءات</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {combinedPayments.map((payment) => (
+                  <TableRow key={payment.id}>
                     <TableCell>
-                      {format(new Date(expense.date), "dd MMM yyyy", { locale: ar })}
+                      {new Date(payment.date).toLocaleDateString("ar-LY")}
                     </TableCell>
-                    <TableCell>{expense.description}</TableCell>
                     <TableCell>
-                      {expense.project?.name || "—"}
+                      <div className="font-semibold text-xs">{payment.description}</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        النوع: {payment.sourceType === "expense" ? "سحب نقدي مباشر" : "دفعة على حساب فاتورة"}
+                      </div>
                     </TableCell>
-                    <TableCell className="font-bold text-green-500">
-                      {formatCurrencyLYD(expense.amount)}
+                    <TableCell>{payment.projectName}</TableCell>
+                    <TableCell className="font-semibold text-primary">{payment.treasuryName}</TableCell>
+                    <TableCell className="text-xs">{payment.paymentMethod}</TableCell>
+                    <TableCell className="font-bold text-emerald-600">
+                      {formatCurrencyLYD(payment.amount)}
                     </TableCell>
-                    <TableCell className="text-center">
+                    <TableCell className="text-center flex justify-center gap-1">
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="text-purple-600 hover:text-purple-700 hover:bg-purple-50"
-                        onClick={() => handlePrintTechnicianReceipt(expense)}
+                        className="text-purple-600 hover:text-purple-700 hover:bg-purple-50 cursor-pointer h-8 w-8"
+                        onClick={() => handlePrintTechnicianReceipt(payment)}
                         title="طباعة إيصال الصرف"
                       >
                         <Printer className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:text-red-700 hover:bg-red-50 cursor-pointer h-8 w-8"
+                        onClick={() => {
+                          if (confirm("هل أنت متأكد من رغبتك في حذف هذه الحركة وإلغاء أثرها المالي؟")) {
+                            if (payment.sourceType === "expense") {
+                              deleteExpenseMutation.mutate(payment.id);
+                            } else {
+                              deletePurchasePaymentMutation.mutate(payment.id);
+                            }
+                          }
+                        }}
+                        disabled={deleteExpenseMutation.isPending || deletePurchasePaymentMutation.isPending}
+                        title="حذف الحركة وإرجاع الرصيد"
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -1172,11 +1486,131 @@ const TechnicianDetail = () => {
             </Table>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
-              لا توجد مدفوعات مسجلة لهذا الفني
+              لا توجد مدفوعات مستلمة مسجلة لهذا الفني بعد.
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* 3. Technician Payment Dialog (from purchases) */}
+      <Dialog open={payDialogOpen} onOpenChange={setPayDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]" dir="rtl">
+          <DialogHeader>
+            <DialogTitle>تسجيل دفعة مالية للفني</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {selectedPurchaseForPay && (
+              <div className="p-3 bg-muted rounded-lg text-xs space-y-1">
+                <p><strong>عقد/فاتورة العمل:</strong> {selectedPurchaseForPay.title || selectedPurchaseForPay.notes || "فاتورة عمل فني"}</p>
+                <p><strong>المبلغ الإجمالي:</strong> {formatCurrencyLYD(selectedPurchaseForPay.total_amount)}</p>
+                <p><strong>المدفوع سابقاً:</strong> {formatCurrencyLYD(selectedPurchaseForPay.paid_amount || 0)}</p>
+                <p className="text-destructive"><strong>المتبقي المستحق:</strong> {formatCurrencyLYD(Number(selectedPurchaseForPay.total_amount) - Number(selectedPurchaseForPay.paid_amount || 0))}</p>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="pay_amount">المبلغ المدفوع (د.ل)</Label>
+              <Input
+                id="pay_amount"
+                type="number"
+                step="0.01"
+                placeholder="أدخل قيمة الدفعة"
+                value={payFormData.amount}
+                onChange={(e) => setPayFormData({ ...payFormData, amount: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="pay_date">التاريخ</Label>
+              <Input
+                id="pay_date"
+                type="date"
+                value={payFormData.date}
+                onChange={(e) => setPayFormData({ ...payFormData, date: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="pay_method">طريقة الدفع</Label>
+              <select
+                id="pay_method"
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={payFormData.payment_method}
+                onChange={(e) => setPayFormData({ ...payFormData, payment_method: e.target.value as any })}
+              >
+                <option value="cash">نقداً</option>
+                <option value="check">صك بنكي</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="pay_treasury_id">الخزينة / الحساب المصرفي الصادر منه (محددة بناءً على نوع المشروع)</Label>
+              <select
+                id="pay_treasury_id"
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm font-semibold text-primary"
+                value={payFormData.treasury_id}
+                onChange={(e) => setPayFormData({ ...payFormData, treasury_id: e.target.value })}
+              >
+                <option value="">اختر الخزينة...</option>
+                {(() => {
+                  const isFinishing = selectedPurchaseForPay?.projects?.project_type === "finishing";
+                  const targetParentId = isFinishing 
+                    ? companySettings?.finishing_treasury_id 
+                    : companySettings?.contracting_treasury_id;
+                  
+                  return treasuries
+                    ?.filter((t: any) => t.parent_id === targetParentId || t.id === targetParentId)
+                    ?.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} (الرصيد: {formatCurrencyLYD(t.balance || 0)})
+                      </option>
+                    ));
+                })()}
+              </select>
+            </div>
+
+            {payFormData.payment_method === "check" && (
+              <div className="space-y-2">
+                <Label htmlFor="pay_commission">العمولة المصرفية (إن وجدت)</Label>
+                <Input
+                  id="pay_commission"
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={payFormData.commission}
+                  onChange={(e) => setPayFormData({ ...payFormData, commission: e.target.value })}
+                />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="pay_notes">ملاحظات</Label>
+              <Input
+                id="pay_notes"
+                placeholder="أدخل أي ملاحظات إضافية"
+                value={payFormData.notes}
+                onChange={(e) => setPayFormData({ ...payFormData, notes: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPayDialogOpen(false)}
+            >
+              إلغاء
+            </Button>
+            <Button
+              type="button"
+              onClick={() => payMutation.mutate(payFormData)}
+              disabled={payMutation.isPending || !payFormData.amount || !payFormData.treasury_id}
+            >
+              {payMutation.isPending ? "جاري تسجيل الدفعة..." : "تسجيل الدفعة"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

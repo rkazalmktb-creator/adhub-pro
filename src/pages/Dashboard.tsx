@@ -399,7 +399,7 @@ const Dashboard = () => {
                   name={project.name}
                   progress={project.progress || 0}
                   status={project.status as any}
-                  budget={project.budget ? formatCurrencyLYD(project.budget) : "0"}
+                  budget={Number(project.budget) > 0 ? formatCurrencyLYD(project.budget) : "بلا ميزانية"}
                   spent={project.spent ? formatCurrencyLYD(project.spent) : "0"}
                   imageUrl={project.image_url}
                   hideFinancials={isEngineer}

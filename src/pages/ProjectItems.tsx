@@ -210,6 +210,7 @@ const ProjectItems = () => {
     component_values: {} as Record<string, string>,
     measurement_factor: "1",
     item_count: "1",
+    formula: "",
   });
   const [formData, setFormData] = useState({
     name: "",
@@ -427,7 +428,7 @@ const ProjectItems = () => {
       const inlineMC = measurementConfigs?.find(c => c.id === inlineItem.measurement_config_id);
       if (inlineMC && inlineMC.formula) {
         try {
-          let formula = inlineMC.formula;
+          let formula = inlineItem.formula || inlineMC.formula;
           const factor = parseFloat(inlineItem.measurement_factor) || 1;
           const itemCount = parseFloat(inlineItem.item_count) || 1;
           
@@ -454,6 +455,7 @@ const ProjectItems = () => {
   }, [
     calculationMethod,
     inlineItem.measurement_config_id,
+    inlineItem.formula,
     inlineItem.component_values,
     inlineItem.measurement_factor,
     inlineItem.item_count,
@@ -806,6 +808,7 @@ const ProjectItems = () => {
       component_values: componentValuesAsStrings,
       measurement_factor: item.measurement_factor?.toString() || "1",
       item_count: "1",
+      formula: item.formula || "",
     });
     setCalculationMethod(item.measurement_config_id ? "config" : "manual");
     setInlineSearch("");
@@ -844,6 +847,7 @@ const ProjectItems = () => {
       component_values: {},
       measurement_factor: "1",
       item_count: "1",
+      formula: "",
     });
     setCalculationMethod("manual");
     setInlineSearch("");
@@ -930,10 +934,6 @@ const ProjectItems = () => {
               إعادة حساب ({items.filter((item: any) => item._raw_total_price === 0 && item.quantity > 0 && item.unit_price > 0).length})
             </Button>
           )}
-          <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
-            <Download className="h-4 w-4 ml-2" />
-            استيراد من البنود العامة
-          </Button>
         </div>
       </div>
 

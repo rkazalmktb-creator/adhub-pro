@@ -86,6 +86,56 @@ export default function Expenses() {
     },
   });
 
+  const { data: treasuries = [] } = useQuery({
+    queryKey: ["treasuries-active-list"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("treasuries")
+        .select("id, name, balance, treasury_type, parent_id")
+        .eq("is_active", true)
+        .order("name");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const treasuryParents = React.useMemo(() => treasuries.filter(t => !(t as any).parent_id), [treasuries]);
+  const allTreasuries = React.useMemo(() => treasuries.filter(t => (t as any).parent_id), [treasuries]);
+
+  const [selectedParentTreasuryId, setSelectedParentTreasuryId] = React.useState<string>("");
+  const [selectedSubTreasuryId, setSelectedSubTreasuryId] = React.useState<string>("");
+
+  // Sync default or editing treasury in dialog
+  React.useEffect(() => {
+    if (isExpenseDialogOpen) {
+      if (editingExpense) {
+        const expenseTreasuryId = (editingExpense as any).treasury_id || "";
+        let parentId = "";
+        if (expenseTreasuryId) {
+          const childTreasury = allTreasuries.find(t => t.id === expenseTreasuryId);
+          if (childTreasury) {
+            parentId = (childTreasury as any).parent_id || "";
+          }
+        }
+        setSelectedParentTreasuryId(parentId);
+        setSelectedSubTreasuryId(expenseTreasuryId);
+      } else {
+        // Find default treasury from settings
+        const defaultParentId = (settings as any)?.contracting_treasury_id || (settings as any)?.finishing_treasury_id || "";
+        setSelectedParentTreasuryId(defaultParentId);
+        if (defaultParentId) {
+          const firstSub = allTreasuries.find(t => (t as any).parent_id === defaultParentId);
+          setSelectedSubTreasuryId(firstSub?.id || "");
+        } else {
+          setSelectedSubTreasuryId("");
+        }
+      }
+    } else {
+      setSelectedParentTreasuryId("");
+      setSelectedSubTreasuryId("");
+    }
+  }, [isExpenseDialogOpen, editingExpense, treasuries, settings]);
+
   // Expense mutations
   const createExpenseMutation = useMutation({
     mutationFn: async (data: ExpenseInsert) => {
@@ -234,6 +284,7 @@ export default function Expenses() {
       payment_method: (fd.get("payment_method") as "cash" | "transfer" | "installments" | "check") ?? "cash",
       invoice_number: (fd.get("invoice_number") as string) || null,
       notes: (fd.get("notes") as string) || null,
+      treasury_id: selectedSubTreasuryId || null,
     };
 
     if (editingExpense) {
@@ -509,6 +560,33 @@ export default function Expenses() {
               <div>
                 <Label>التاريخ</Label>
                 <Input name="date" type="date" defaultValue={editingExpense?.date ?? new Date().toISOString().slice(0, 10)} />
+              </div>
+
+              {/* Treasury Branch Selector */}
+              <div>
+                <Label>الخزينة المخصوم منها (الفرع) *</Label>
+                <select
+                  name="treasury_id"
+                  value={selectedSubTreasuryId}
+                  onChange={(e) => setSelectedSubTreasuryId(e.target.value)}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  required
+                >
+                  <option value="">-- اختر فرع الخزينة المخصوم منه --</option>
+                  {treasuryParents.map((parent) => {
+                    const children = allTreasuries.filter(c => (c as any).parent_id === parent.id);
+                    if (children.length === 0) return null;
+                    return (
+                      <optgroup key={parent.id} label={`💰 ${parent.name}`}>
+                        {children.map((child) => (
+                          <option key={child.id} value={child.id}>
+                            {child.name} (الرصيد: {formatCurrencyLYD(child.balance || 0)})
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+                </select>
               </div>
 
               <div>

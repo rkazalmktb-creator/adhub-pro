@@ -60,7 +60,8 @@ const getNavigationGroups = (isAdmin: boolean, isEngineer: boolean, isAccountant
       items: [
         { name: "لوحة التحكم", href: "/", icon: LayoutDashboard, roles: ["admin", "engineer", "supervisor"] },
         { name: "لوحة التحكم المالية", href: "/accountant", icon: Coins, roles: ["admin", "accountant"] },
-        { name: "المشاريع", href: "/projects", icon: FolderKanban, roles: ["admin", "engineer", "supervisor"] },
+        { name: "مشاريع المقاولات", href: "/projects/contracting", icon: FolderKanban, roles: ["admin", "engineer", "supervisor"] },
+        { name: "مشاريع التشطيبات", href: "/projects/finishing", icon: FolderKanban, roles: ["admin", "engineer", "supervisor"] },
         { name: "سجل حركات الزبائن", href: "/client-activities", icon: Users, roles: ["admin", "accountant"] },
       ],
     },
@@ -71,16 +72,6 @@ const getNavigationGroups = (isAdmin: boolean, isEngineer: boolean, isAccountant
         { name: "المعدات", href: "/equipment", icon: Wrench, roles: ["admin", "supervisor"] },
         { name: "إيجارات المشاريع", href: "/rentals", icon: Truck, roles: ["admin", "supervisor"], badge: true },
         { name: "المخازن", href: "/inventory", icon: Warehouse, roles: ["admin", "supervisor"] },
-      ],
-    },
-    {
-      label: "التخطيط والمخاطر",
-      items: [
-        { name: "التدفق النقدي", href: "/cash-flow", icon: BarChart3, roles: ["admin", "accountant"] },
-        { name: "سجل المخاطر", href: "/risk-register", icon: AlertTriangle, roles: ["admin", "supervisor", "engineer"] },
-        { name: "الجدولة الزمنية", href: "/schedule", icon: CalendarDays, roles: ["admin", "engineer", "supervisor"] },
-        { name: "ضبط الجودة", href: "/quality", icon: ClipboardCheck, roles: ["admin", "engineer", "supervisor"] },
-        { name: "أوامر التغيير", href: "/variation-orders", icon: GitBranch, roles: ["admin", "accountant"] },
       ],
     },
     {
@@ -99,7 +90,8 @@ const getNavigationGroups = (isAdmin: boolean, isEngineer: boolean, isAccountant
         { name: "مصروفات المشاريع", href: "/project-expenses", icon: Coins, roles: ["admin", "accountant"] },
         { name: "مركز الفواتير", href: "/invoice-control", icon: Receipt, roles: ["admin", "accountant"] },
         { name: "خزائن الشركة", href: "/treasuries", icon: Wallet, roles: ["admin", "accountant"] },
-        { name: "الدخول", href: "/income", icon: TrendingUp, roles: ["admin", "accountant"] },
+        { name: "إيصالات مقبوضات الزبائن", href: "/client-payments", icon: TrendingUp, roles: ["admin", "accountant"] },
+        { name: "ديون وذمم الزبائن", href: "/debts", icon: AlertTriangle, roles: ["admin", "accountant"] },
         { name: "الدخول والخروج", href: "/transfers", icon: ArrowLeftRight, roles: ["admin", "accountant"] },
         { name: "الخروج", href: "/expenses", icon: TrendingDown, roles: ["admin", "accountant"] },
       ],

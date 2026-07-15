@@ -204,12 +204,6 @@ const Treasuries = () => {
         reference_id: form.fromTreasuryId,
       }]);
       if (e2) throw e2;
-
-      // Update balances
-      const { error: e3 } = await supabase.from("treasuries").update({ balance: newFromBalance }).eq("id", form.fromTreasuryId);
-      if (e3) throw e3;
-      const { error: e4 } = await supabase.from("treasuries").update({ balance: newToBalance }).eq("id", form.toTreasuryId);
-      if (e4) throw e4;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["treasuries"] });
@@ -485,7 +479,7 @@ const Treasuries = () => {
                               </div>
                               
                               {child.treasury_type === "bank" && child.account_number && (
-                                <p className="text-[11px] text-muted-foreground font-mono bg-muted/40 px-2 py-0.5 rounded mb-3 self-start">
+                                <p className="text-[11px] text-muted-foreground bg-muted/40 px-2 py-0.5 rounded mb-3 self-start">
                                   {child.account_number}
                                 </p>
                               )}
@@ -553,7 +547,7 @@ const Treasuries = () => {
                       <Badge className="bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border-none text-xs rounded-lg px-2 py-0.5">
                         سلفة
                       </Badge>
-                      <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-mono">
+                      <span className="text-[11px] text-muted-foreground flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
                         {loan.date}
                       </span>
@@ -588,7 +582,7 @@ const Treasuries = () => {
                       <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border-none text-xs rounded-lg px-2 py-0.5">
                         عهدة مؤقتة
                       </Badge>
-                      <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-mono">
+                      <span className="text-[11px] text-muted-foreground flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
                         {adv.date}
                       </span>
@@ -680,7 +674,7 @@ const Treasuries = () => {
                     value={formData.account_number || ""}
                     onChange={(e) => setFormData({ ...formData, account_number: e.target.value })}
                     placeholder="رقم الحساب"
-                    className="rounded-lg font-mono text-left"
+                    className="rounded-lg text-left"
                   />
                 </div>
               </div>

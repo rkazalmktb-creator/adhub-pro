@@ -17,6 +17,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  SelectGroup,
+  SelectLabel,
 } from "@/components/ui/select";
 import {
   Wallet,
@@ -61,6 +63,8 @@ interface PaymentFormData {
   date: string;
   payment_method: string;
   notes: string;
+  treasury_id: string;
+  actualAmount?: number;
 }
 
 interface Phase {
@@ -115,22 +119,32 @@ export default function PaymentAllocationDialog({
     date: new Date().toISOString().split("T")[0],
     payment_method: "cash",
     notes: "",
+    treasury_id: "",
   });
   const [allocations, setAllocations] = useState<AllocationInput[]>([]);
   const [bulkAmount, setBulkAmount] = useState("");
+
+  const parentTreasuries = useMemo(() =>
+    allTreasuries?.filter(t => !t.parent_id) ?? [], [allTreasuries]);
+  const subTreasuries = useMemo(() =>
+    allTreasuries?.filter(t => !!t.parent_id) ?? [], [allTreasuries]);
 
   // Initialize allocations when dialog opens
   useEffect(() => {
     if (open && invoices) {
       setAllocations(invoices.map(inv => ({ invoice: inv, amount: 0, selected: false })));
       setBulkAmount("");
+      
+      const defaultTreasury = allTreasuries?.find(t => t.treasury_type === "cash")?.id || allTreasuries?.[0]?.id || "";
+      
       setFormData({
         date: new Date().toISOString().split("T")[0],
         payment_method: "cash",
         notes: "",
+        treasury_id: defaultTreasury,
       });
     }
-  }, [open, invoices]);
+  }, [open, invoices, allTreasuries]);
 
   const handleOpenChange = (isOpen: boolean) => {
     if (!isOpen) onClose();
@@ -264,8 +278,11 @@ export default function PaymentAllocationDialog({
     );
   };
 
+  const actualAmount = parseFloat(bulkAmount) || stats.totalWithFee;
+  const surplus = Math.max(0, actualAmount - stats.totalWithFee);
+
   const handleSave = () => {
-    onSave(formData, allocations);
+    onSave({ ...formData, actualAmount }, allocations);
   };
 
   return (
@@ -283,34 +300,57 @@ export default function PaymentAllocationDialog({
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {/* Quick Settings Row */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-muted/20 p-4 rounded-xl border border-border/50">
             <div className="space-y-1">
-              <Label className="text-xs">التاريخ</Label>
+              <Label className="text-xs font-semibold">التاريخ</Label>
               <Input
                 type="date"
                 value={formData.date}
                 onChange={e => setFormData({ ...formData, date: e.target.value })}
-                className="h-9"
+                className="h-9 rounded-lg"
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">طريقة الدفع</Label>
+              <Label className="text-xs font-semibold">طريقة الدفع</Label>
               <Select value={formData.payment_method} onValueChange={v => setFormData({ ...formData, payment_method: v })}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-9 rounded-lg"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="cash">كاش</SelectItem>
+                  <SelectItem value="cash">كاش / نقدي</SelectItem>
                   <SelectItem value="bank_transfer">تحويل بنكي</SelectItem>
                   <SelectItem value="check">شيك</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">ملاحظات</Label>
+              <Label className="text-xs font-semibold">خزينة الإيداع</Label>
+              <Select value={formData.treasury_id} onValueChange={v => setFormData({ ...formData, treasury_id: v })}>
+                <SelectTrigger className="h-9 rounded-lg"><SelectValue placeholder="اختر الخزينة" /></SelectTrigger>
+                <SelectContent>
+                  {parentTreasuries.map(parent => {
+                    const children = subTreasuries.filter(s => s.parent_id === parent.id);
+                    return (
+                      <SelectGroup key={parent.id} className="border-b border-border/10 pb-1.5 mb-1.5 last:border-0 last:pb-0 last:mb-0">
+                        <SelectLabel className="font-bold text-xs text-primary px-2 py-1 flex items-center gap-1 bg-primary/5 rounded-md">
+                          {parent.name}
+                        </SelectLabel>
+                        {children.map(child => (
+                          <SelectItem key={child.id} value={child.id} className="pr-6 cursor-pointer">
+                            {child.name} ({formatCurrencyLYD(child.balance ?? 0)})
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">ملاحظات</Label>
               <Input
                 value={formData.notes}
                 onChange={e => setFormData({ ...formData, notes: e.target.value })}
                 placeholder="اختياري..."
-                className="h-9"
+                className="h-9 rounded-lg"
               />
             </div>
           </div>
@@ -519,6 +559,12 @@ export default function PaymentAllocationDialog({
 
         {/* Sticky Footer Summary */}
         <div className="border-t bg-card p-4 shrink-0 space-y-3">
+          {surplus > 0 && (
+            <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-700 dark:text-yellow-400 p-2.5 rounded-lg text-xs font-semibold flex items-center justify-between animate-in fade-in duration-200">
+              <span>سيتم ترحيل المبلغ الزائد كرصيد فائض للزبون:</span>
+              <span className="font-bold">{formatCurrencyLYD(surplus)}</span>
+            </div>
+          )}
           {stats.totalFee > 0 && (
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>الفواتير: {formatCurrencyLYD(stats.totalBase)}</span>
@@ -531,7 +577,7 @@ export default function PaymentAllocationDialog({
             </Button>
             <Button
               onClick={handleSave}
-              disabled={isSaving || stats.totalBase <= 0}
+              disabled={isSaving || actualAmount <= 0}
               className="flex-1 gap-2 text-base h-11"
             >
               {isSaving ? (
@@ -539,7 +585,7 @@ export default function PaymentAllocationDialog({
               ) : (
                 <Zap className="h-4 w-4" />
               )}
-              {isSaving ? "جاري الحفظ..." : `تسديد ${formatCurrencyLYD(stats.totalWithFee)}`}
+              {isSaving ? "جاري الحفظ..." : `سداد ${formatCurrencyLYD(actualAmount)}`}
             </Button>
           </div>
         </div>

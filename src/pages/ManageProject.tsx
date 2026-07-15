@@ -45,7 +45,9 @@ import {
   Upload,
   Clipboard,
   Trash2,
-  Loader2
+  Loader2,
+  Wallet,
+  Landmark
 } from "lucide-react";
 import { formatCurrencyLYD } from "@/lib/currency";
 
@@ -55,6 +57,7 @@ const projectSchema = z.object({
   client_id: z.string().optional().or(z.literal("")),
   supervising_engineer_id: z.string().optional().or(z.literal("")),
   status: z.enum(["active", "pending", "completed", "cancelled"]),
+  project_type: z.enum(["contracting", "finishing"]).default("contracting"),
   budget: z.preprocess(
     (val) => {
       if (val === "" || val === undefined || val === null) return 0;
@@ -69,6 +72,16 @@ const projectSchema = z.object({
   location: z.string().max(200).optional().or(z.literal("")),
   notes: z.string().optional().or(z.literal("")),
   image_url: z.string().optional().or(z.literal("")),
+  finishing_percentage: z.preprocess(
+    (val) => {
+      if (val === "" || val === undefined || val === null) return 0;
+      const str = String(val).replace(/,/g, "");
+      const num = parseFloat(str);
+      return isNaN(num) ? 0 : num;
+    },
+    z.number().min(0, "النسبة يجب أن تكون أكبر من أو تساوي 0").max(100, "النسبة لا يمكن أن تتجاوز 100")
+  ).optional().default(0),
+  default_treasury_id: z.string().optional().or(z.literal("")),
 });
 
 type ProjectFormData = z.infer<typeof projectSchema>;
@@ -87,6 +100,7 @@ const ManageProject = () => {
   const [searchParams] = useSearchParams();
   const clientIdFromUrl = searchParams.get("client_id");
   const returnTo = searchParams.get("returnTo");
+  const projectTypeFromUrl = searchParams.get("type") as "contracting" | "finishing" | null;
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -165,7 +179,8 @@ const ManageProject = () => {
   const getReturnPath = () => {
     if (returnTo) return returnTo;
     if (clientIdFromUrl) return `/projects/client/${clientIdFromUrl}`;
-    return "/projects";
+    const currentType = watch("project_type");
+    return `/projects/${currentType || "contracting"}`;
   };
 
   const {
@@ -178,6 +193,7 @@ const ManageProject = () => {
     resolver: zodResolver(projectSchema),
     defaultValues: {
       status: "active",
+      project_type: projectTypeFromUrl || "contracting",
       budget: 0,
       budget_type: "open",
       client_id: clientIdFromUrl || "",
@@ -208,6 +224,44 @@ const ManageProject = () => {
       return data;
     },
   });
+
+  const { data: treasuries } = useQuery({
+    queryKey: ["parent-treasuries"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("treasuries")
+        .select("id, name, treasury_type, is_active")
+        .is("parent_id", null)
+        .eq("is_active", true)
+        .order("name");
+      if (error) throw error;
+      return data;
+    },
+  });
+  const { data: companySettings } = useQuery({
+    queryKey: ["company-settings"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("company_settings")
+        .select("*")
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const projectType = watch("project_type");
+  
+  useEffect(() => {
+    if (companySettings) {
+      if (projectType === "contracting") {
+        setValue("default_treasury_id", companySettings.contracting_treasury_id || "", { shouldDirty: true });
+      } else if (projectType === "finishing") {
+        setValue("default_treasury_id", companySettings.finishing_treasury_id || "", { shouldDirty: true });
+      }
+    }
+  }, [projectType, companySettings, setValue]);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", id],
@@ -262,6 +316,7 @@ const ManageProject = () => {
       setValue("client_id", project.client_id || "");
       setValue("supervising_engineer_id", (project as any).supervising_engineer_id || "");
       setValue("status", project.status as "active" | "pending" | "completed" | "cancelled");
+      setValue("project_type", (project as any).project_type || "contracting");
       setValue("budget", project.budget);
       const bt = project.budget_type === 'fixed' ? 'warning' : (project.budget_type as "open" | "warning" | "lumpsum") || "open";
       setValue("budget_type", bt);
@@ -269,6 +324,8 @@ const ManageProject = () => {
       setValue("location", project.location || "");
       setValue("notes", project.notes || "");
       setValue("image_url", (project as any).image_url || "");
+      setValue("finishing_percentage", (project as any).finishing_percentage || 0);
+      setValue("default_treasury_id", (project as any).default_treasury_id || "");
     } else if (clientIdFromUrl && !isEdit) {
       setValue("client_id", clientIdFromUrl);
     }
@@ -282,6 +339,7 @@ const ManageProject = () => {
         client_id: data.client_id || clientIdFromUrl || null,
         supervising_engineer_id: data.supervising_engineer_id || null,
         status: data.status,
+        project_type: data.project_type,
         budget: data.budget_type === "open" ? 0 : (data.budget || 0),
         spent: 0,
         progress: 0,
@@ -290,6 +348,8 @@ const ManageProject = () => {
         location: data.location || null,
         notes: data.notes || null,
         image_url: data.image_url || null,
+        finishing_percentage: data.project_type === "finishing" ? (data.finishing_percentage || 0) : 0,
+        default_treasury_id: data.default_treasury_id || null,
       };
       const { error } = await supabase.from("projects").insert([insertData as any]);
       if (error) throw error;
@@ -312,12 +372,15 @@ const ManageProject = () => {
         client_id: data.client_id || null,
         supervising_engineer_id: data.supervising_engineer_id || null,
         status: data.status,
+        project_type: data.project_type,
         budget: data.budget_type === "open" ? 0 : (data.budget || 0),
         spent: calculatedSpent,
         start_date: data.start_date || null,
         location: data.location || null,
         notes: data.notes || null,
         image_url: data.image_url || null,
+        finishing_percentage: data.project_type === "finishing" ? (data.finishing_percentage || 0) : 0,
+        default_treasury_id: data.default_treasury_id || null,
       };
       const { error } = await supabase
         .from("projects")
@@ -438,7 +501,73 @@ const ManageProject = () => {
             )}
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="project_type">نوع المشروع / الفواتير *</Label>
+              <Select
+                value={watch("project_type") || "contracting"}
+                onValueChange={(value) => {
+                  setValue("project_type", value as "contracting" | "finishing", { shouldDirty: true });
+                  if (value === "contracting") {
+                    setValue("finishing_percentage", 0);
+                  }
+                }}
+              >
+                <SelectTrigger dir="rtl">
+                  <SelectValue placeholder="اختر نوع الفواتير" />
+                </SelectTrigger>
+                <SelectContent dir="rtl">
+                  <SelectItem value="contracting">مشاريع مقاولات (حسب البنود الفردية)</SelectItem>
+                  <SelectItem value="finishing">مشاريع تشطيبات (نسبة مئوية مضافة)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {watch("project_type") === "finishing" && (
+              <div className="space-y-2">
+                <Label htmlFor="finishing_percentage">نسبة الإشراف / التشطيب (%) *</Label>
+                <Input
+                  id="finishing_percentage"
+                  type="number"
+                  placeholder="مثال: 10"
+                  {...register("finishing_percentage")}
+                  className="text-base font-bold"
+                />
+                {errors.finishing_percentage && (
+                  <p className="text-sm text-destructive">{errors.finishing_percentage.message}</p>
+                )}
+              </div>
+            )}
+
+            {/* Default Treasury Selection */}
+            <div className="space-y-2">
+              <Label htmlFor="default_treasury_id" className="flex items-center gap-1.5">
+                <Wallet className="h-3.5 w-3.5 text-muted-foreground" />
+                الخزينة الافتراضية للمشروع
+              </Label>
+              <Select
+                value={watch("default_treasury_id") || "__none__"}
+                onValueChange={(value) => setValue("default_treasury_id", value === "__none__" ? "" : value, { shouldDirty: true })}
+                disabled={true}
+              >
+                <SelectTrigger dir="rtl">
+                  <SelectValue placeholder="اختر الخزينة" />
+                </SelectTrigger>
+                <SelectContent dir="rtl">
+                  <SelectItem value="__none__">بدون خزينة افتراضية</SelectItem>
+                  {treasuries?.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      <span className="flex items-center gap-2">
+                        {t.treasury_type === "bank" ? <Landmark className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
+                        {t.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">المراحل الجديدة سترتبط تلقائياً بهذه الخزينة</p>
+            </div>
+            
             <div className="space-y-2">
               <Label htmlFor="client_id" className="flex items-center gap-1.5">
                 <User className="h-3.5 w-3.5 text-muted-foreground" />

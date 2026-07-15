@@ -55,14 +55,11 @@ import TreasuryDetail from "./pages/TreasuryDetail";
 import ClientActivities from "./pages/ClientActivities";
 import AuditLog from "./pages/AuditLog";
 import AccountantDashboard from "./pages/AccountantDashboard";
-import CashFlow from "./pages/CashFlow";
-import RiskRegister from "./pages/RiskRegister";
 import Inventory from "./pages/Inventory";
-import ProjectSchedule from "./pages/ProjectSchedule";
-import QualityControl from "./pages/QualityControl";
-import VariationOrders from "./pages/VariationOrders";
 import CalendarPage from "./pages/Calendar";
 import InvoiceControl from "./pages/InvoiceControl";
+import ClientPayments from "./pages/ClientPayments";
+import Debts from "./pages/Debts";
 
 const queryClient = new QueryClient();
 
@@ -87,6 +84,8 @@ const App = () => (
               <Route index element={<Dashboard />} />
               <Route path="accountant" element={<AccountantDashboard />} />
               <Route path="projects" element={<Projects />} />
+              <Route path="projects/contracting" element={<Projects type="contracting" />} />
+              <Route path="projects/finishing" element={<Projects type="finishing" />} />
               <Route path="projects/client/:clientId" element={<ClientProjects />} />
               <Route path="projects/new" element={<ManageProject />} />
               <Route path="projects/:id" element={<ManageProject />} />
@@ -104,6 +103,7 @@ const App = () => (
               <Route path="projects/:id/phases/:phaseId/expenses" element={<ProjectExpenses />} />
               <Route path="projects/:id/phases/:phaseId/equipment" element={<ProjectEquipmentRentals />} />
               <Route path="projects/:id/payments" element={<ProjectPayments />} />
+              <Route path="client-payments" element={<ClientPayments />} />
               <Route path="rentals" element={<ProjectsWithRentals />} />
               <Route path="project-expenses" element={<AllProjectExpenses />} />
               <Route path="custody" element={<Custody />} />
@@ -117,6 +117,7 @@ const App = () => (
               <Route path="contracts/new" element={<CreateContract />} />
               <Route path="contracts/:id" element={<CreateContract />} />
               <Route path="clients" element={<Clients />} />
+              <Route path="debts" element={<Debts />} />
               <Route path="clients/:id" element={<ClientDetail />} />
               <Route path="suppliers" element={<Suppliers />} />
               <Route path="suppliers/:id" element={<SupplierDetail />} />
@@ -138,15 +139,7 @@ const App = () => (
               <Route path="treasuries/:id" element={<TreasuryDetail />} />
               <Route path="client-activities" element={<ClientActivities />} />
               <Route path="audit-log" element={<AuditLog />} />
-              <Route path="cash-flow" element={<CashFlow />} />
-              <Route path="risk-register" element={<RiskRegister />} />
               <Route path="inventory" element={<Inventory />} />
-              <Route path="schedule" element={<ProjectSchedule />} />
-              <Route path="projects/:id/schedule" element={<ProjectSchedule />} />
-              <Route path="quality" element={<QualityControl />} />
-              <Route path="projects/:id/quality" element={<QualityControl />} />
-              <Route path="variation-orders" element={<VariationOrders />} />
-              <Route path="projects/:id/variation-orders" element={<VariationOrders />} />
               <Route path="invoice-control" element={<InvoiceControl />} />
             </Route>
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

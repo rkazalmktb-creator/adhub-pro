@@ -752,7 +752,7 @@ const MeasurementTypes = () => {
                           ) : formulaAnalysis.status === "ok" ? (
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">المعادلة صحيحة ✓</p>
-                              <span className="font-bold font-mono text-lg text-emerald-700 dark:text-emerald-300" dir="ltr">
+                              <span className="font-bold text-lg text-emerald-700 dark:text-emerald-300" dir="ltr">
                                 = {formulaAnalysis.result.toFixed(4).replace(/\.?0+$/, "")}
                               </span>
                             </div>
@@ -766,7 +766,7 @@ const MeasurementTypes = () => {
 
                       {/* Evaluated expression preview */}
                       {formulaAnalysis?.status === "ok" && (
-                        <p className="text-[10px] text-muted-foreground font-mono text-left" dir="ltr">
+                        <p className="text-[10px] text-muted-foreground text-left" dir="ltr">
                           {formulaAnalysis.evaluated} = {formulaAnalysis.result.toFixed(4).replace(/\.?0+$/, "")}
                         </p>
                       )}

@@ -24,6 +24,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  SelectGroup,
+  SelectLabel,
 } from "@/components/ui/select";
 import {
   Table,
@@ -44,7 +46,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, ArrowRight, Pencil, Trash2, Coins, Printer, Layers } from "lucide-react";
+import { Plus, ArrowRight, Pencil, Trash2, Coins, Printer, Layers, Wallet, Landmark } from "lucide-react";
 import { formatCurrencyLYD } from "@/lib/currency";
 import { format, parseISO } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -83,6 +85,7 @@ const ProjectExpenses = () => {
     payment_method: "cash" as "cash" | "transfer" | "check" | "installments",
     date: new Date().toISOString().split("T")[0],
     notes: "",
+    treasury_id: "",
   });
 
   // Fetch project details
@@ -117,12 +120,8 @@ const ProjectExpenses = () => {
   });
 
   useEffect(() => {
-    if (!phaseId && projectPhases) {
-      setForcedPhaseSelectorOpen(true);
-    } else {
-      setForcedPhaseSelectorOpen(false);
-    }
-  }, [phaseId, projectPhases]);
+    setForcedPhaseSelectorOpen(false);
+  }, []);
 
   // Fetch project expenses (مصروفات only)
   const { data: expenses, isLoading: expensesLoading } = useQuery({
@@ -161,6 +160,66 @@ const ProjectExpenses = () => {
     },
   });
 
+  // Fetch all active treasuries (with parent info)
+  const { data: allTreasuriesRaw = [] } = useQuery({
+    queryKey: ["treasuries-active"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("treasuries")
+        .select("id, name, balance, treasury_type, parent_id")
+        .eq("is_active", true)
+        .order("name");
+      if (error) throw error;
+      return data;
+    },
+  });
+  const treasuryParents = allTreasuriesRaw.filter(t => !(t as any).parent_id);
+  const allTreasuries = allTreasuriesRaw.filter(t => (t as any).parent_id);
+
+  const [selectedParentTreasuryId, setSelectedParentTreasuryId] = useState<string>("");
+
+  // Auto-select default treasuries based on project or system settings
+  useEffect(() => {
+    if (!editingExpense && project && companySettings && allTreasuriesRaw.length > 0) {
+      const defaultParentId = (project as any)?.default_treasury_id || 
+        (project?.project_type === "contracting" ? (companySettings as any)?.contracting_treasury_id : (companySettings as any)?.finishing_treasury_id);
+
+      if (defaultParentId) {
+        setSelectedParentTreasuryId(defaultParentId);
+        // Find the first sub-treasury (child) belonging to this default parent
+        const defaultSubTreasury = allTreasuriesRaw.find(t => (t as any).parent_id === defaultParentId);
+        if (defaultSubTreasury) {
+          setFormData(prev => ({
+            ...prev,
+            treasury_id: defaultSubTreasury.id
+          }));
+        }
+      }
+    }
+  }, [project, companySettings, allTreasuriesRaw, editingExpense]);
+
+  const resetForm = () => {
+    const defaultParentId = (project as any)?.default_treasury_id || 
+      (project?.project_type === "contracting" ? (companySettings as any)?.contracting_treasury_id : (companySettings as any)?.finishing_treasury_id) || "";
+    
+    const defaultSubTreasuryId = defaultParentId 
+      ? allTreasuriesRaw.find(t => (t as any).parent_id === defaultParentId)?.id || "" 
+      : "";
+
+    setFormData({
+      description: "",
+      amount: "",
+      type: "other",
+      subtype: "مصروفات",
+      payment_method: "cash",
+      date: new Date().toISOString().split("T")[0],
+      notes: "",
+      treasury_id: defaultSubTreasuryId,
+    });
+    setSelectedParentTreasuryId(defaultParentId);
+    setEditingExpense(null);
+  };
+
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
       const { error } = await supabase
@@ -175,12 +234,15 @@ const ProjectExpenses = () => {
           payment_method: data.payment_method,
           date: data.date,
           notes: data.notes || null,
+          treasury_id: data.treasury_id || null,
         });
       
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-expenses", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["treasuries"] });
+      queryClient.invalidateQueries({ queryKey: ["treasury_transactions"] });
       toast({ title: "تم إضافة المصروف بنجاح" });
       resetForm();
       setIsDialogOpen(false);
@@ -189,7 +251,7 @@ const ProjectExpenses = () => {
       toast({ title: "حدث خطأ", description: error.message, variant: "destructive" });
     },
   });
-
+ 
   const updateMutation = useMutation({
     mutationFn: async (data: typeof formData & { id: string }) => {
       const { error } = await supabase
@@ -201,6 +263,7 @@ const ProjectExpenses = () => {
           payment_method: data.payment_method,
           date: data.date,
           notes: data.notes || null,
+          treasury_id: data.treasury_id || null,
         })
         .eq("id", data.id);
       
@@ -237,21 +300,17 @@ const ProjectExpenses = () => {
     },
   });
 
-  const resetForm = () => {
-    setFormData({
-      description: "",
-      amount: "",
-      type: "other",
-      subtype: "مصروفات",
-      payment_method: "cash",
-      date: new Date().toISOString().split("T")[0],
-      notes: "",
-    });
-    setEditingExpense(null);
-  };
 
   const handleEdit = (expense: any) => {
     setEditingExpense(expense);
+    const expenseTreasuryId = expense.treasury_id || "";
+    let parentId = "";
+    if (expenseTreasuryId) {
+      const childTreasury = allTreasuries.find(t => t.id === expenseTreasuryId);
+      if (childTreasury) {
+        parentId = (childTreasury as any).parent_id || "";
+      }
+    }
     setFormData({
       description: expense.description,
       amount: expense.amount.toString(),
@@ -260,12 +319,34 @@ const ProjectExpenses = () => {
       payment_method: expense.payment_method,
       date: expense.date,
       notes: expense.notes || "",
+      treasury_id: expenseTreasuryId,
     });
+    setSelectedParentTreasuryId(parentId);
     setIsDialogOpen(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.treasury_id) {
+      toast({
+        title: "خطأ",
+        description: "يرجى اختيار الخزينة الفرعية المخصوم منها المصروف",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const selectedTreasury = allTreasuries.find(t => t.id === formData.treasury_id);
+    const amountNum = parseFloat(formData.amount) || 0;
+    if (selectedTreasury && (selectedTreasury.balance || 0) < amountNum) {
+      toast({
+        title: "خطأ",
+        description: `رصيد الخزينة غير كافٍ. المطلوب: ${formatCurrencyLYD(amountNum)} - المتاح: ${formatCurrencyLYD(selectedTreasury.balance || 0)}`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (editingExpense) {
       updateMutation.mutate({ ...formData, id: editingExpense.id });
     } else {
@@ -458,6 +539,47 @@ const ProjectExpenses = () => {
                   </div>
                 </div>
                 
+                {/* Treasury Selector */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold flex items-center gap-1.5">
+                    <Wallet className="h-4 w-4 text-primary" />
+                    الخزينة المخصوم منها (الفرع) *
+                  </Label>
+                  <Select
+                    value={formData.treasury_id}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, treasury_id: value }))}
+                  >
+                    <SelectTrigger className="w-full" dir="rtl">
+                      <SelectValue placeholder="اختر فرع الخزينة المخصوم منه" />
+                    </SelectTrigger>
+                    <SelectContent dir="rtl">
+                      {treasuryParents.map((parent) => {
+                        const children = allTreasuries.filter(c => (c as any).parent_id === parent.id);
+                        if (children.length === 0) return null;
+                        return (
+                          <SelectGroup key={parent.id}>
+                            <SelectLabel className="font-bold text-primary border-b border-border/40 pb-1 mb-1 mt-2 text-xs">
+                              💰 {parent.name}
+                            </SelectLabel>
+                            {children.map((child) => (
+                              <SelectItem key={child.id} value={child.id} className="pr-6">
+                                <span className="flex items-center gap-2">
+                                  {(child as any).treasury_type === "bank" ? (
+                                    <Landmark className="h-3.5 w-3.5 text-muted-foreground" />
+                                  ) : (
+                                    <Wallet className="h-3.5 w-3.5 text-muted-foreground" />
+                                  )}
+                                  {child.name} (الرصيد: {formatCurrencyLYD(child.balance || 0)})
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="notes">ملاحظات</Label>
                   <Textarea

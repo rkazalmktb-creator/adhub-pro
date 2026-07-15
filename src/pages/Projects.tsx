@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +46,7 @@ import {
   CalendarDays,
   ClipboardCheck,
   GitBranch,
+  CreditCard,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -82,15 +83,24 @@ const statusBadgeClass: Record<string, string> = {
   cancelled: "bg-red-500/10 text-red-600 border-red-500/20",
 };
 
-const Projects = () => {
+interface ProjectsProps {
+  type?: "contracting" | "finishing";
+}
+
+const Projects = ({ type }: ProjectsProps = {}) => {
   const { isEngineer, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [projectTypeFilter, setProjectTypeFilter] = useState<string>(type || "all");
   const [viewMode, setViewMode] = useState<"grid" | "list">(() => {
     return (localStorage.getItem("projects-view-mode") as "grid" | "list") || "grid";
   });
+
+  useEffect(() => {
+    setProjectTypeFilter(type || "all");
+  }, [type]);
 
   const handleViewModeChange = (mode: "grid" | "list") => {
     setViewMode(mode);
@@ -132,6 +142,40 @@ const Projects = () => {
     enabled: expandedProjects.size > 0,
   });
 
+  // Fetch total payments per project
+  const { data: projectPaymentsMap } = useQuery({
+    queryKey: ["projects-payments-total"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("client_payments")
+        .select("project_id, amount");
+      if (error) throw error;
+      const map: Record<string, number> = {};
+      data?.forEach((p) => {
+        if (!p.project_id) return;
+        map[p.project_id] = (map[p.project_id] || 0) + Number(p.amount);
+      });
+      return map;
+    },
+  });
+
+  // Fetch total contracting items value per project
+  const { data: projectItemsTotalMap } = useQuery({
+    queryKey: ["projects-items-total"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("project_items")
+        .select("project_id, total_price");
+      if (error) throw error;
+      const map: Record<string, number> = {};
+      data?.forEach((item) => {
+        if (!item.project_id) return;
+        map[item.project_id] = (map[item.project_id] || 0) + Number(item.total_price || 0);
+      });
+      return map;
+    },
+  });
+
   const toggleProject = (projectId: string) => {
     setExpandedProjects((prev) => {
       const next = new Set(prev);
@@ -149,14 +193,18 @@ const Projects = () => {
       p.clients?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.location?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "all" || p.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesType = projectTypeFilter === "all" || (p as any).project_type === projectTypeFilter;
+    return matchesSearch && matchesStatus && matchesType;
   });
 
-  // Stats
-  const totalProjects = projects?.length || 0;
-  const activeCount = projects?.filter((p) => p.status === "active").length || 0;
-  const pendingCount = projects?.filter((p) => p.status === "pending").length || 0;
-  const completedCount = projects?.filter((p) => p.status === "completed").length || 0;
+  // Stats - filtered by project type when a type is active
+  const typeFilteredProjects = type
+    ? projects?.filter((p) => (p as any).project_type === type)
+    : projects;
+  const totalProjects = typeFilteredProjects?.length || 0;
+  const activeCount = typeFilteredProjects?.filter((p) => p.status === "active").length || 0;
+  const pendingCount = typeFilteredProjects?.filter((p) => p.status === "pending").length || 0;
+  const completedCount = typeFilteredProjects?.filter((p) => p.status === "completed").length || 0;
 
   if (isLoading) {
     return (
@@ -174,51 +222,11 @@ const Projects = () => {
       <DropdownMenuGroup>
         <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/phases`)} className="gap-2 cursor-pointer">
           <Layers className="h-4 w-4 text-muted-foreground" />
-          <span>المراحل</span>
+          <span>مراحل المشروع</span>
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/schedule`)} className="gap-2 cursor-pointer">
-          <CalendarDays className="h-4 w-4 text-muted-foreground" />
-          <span>الجدولة الزمنية</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/progress`)} className="gap-2 cursor-pointer">
-          <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          <span>نسب الإنجاز</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/contracts`)} className="gap-2 cursor-pointer">
-          <FileText className="h-4 w-4 text-muted-foreground" />
-          <span>العقود</span>
-        </DropdownMenuItem>
-        {!isEngineer && (
-          <>
-            <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/purchases`)} className="gap-2 cursor-pointer">
-              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-              <span>المشتريات</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/expenses`)} className="gap-2 cursor-pointer">
-              <Coins className="h-4 w-4 text-muted-foreground" />
-              <span>المصروفات</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/payments`)} className="gap-2 cursor-pointer">
-              <Wallet className="h-4 w-4 text-muted-foreground" />
-              <span>المدفوعات</span>
-            </DropdownMenuItem>
-          </>
-        )}
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/equipment`)} className="gap-2 cursor-pointer">
-          <Wrench className="h-4 w-4 text-muted-foreground" />
-          <span>إيجارات المعدات</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/quality`)} className="gap-2 cursor-pointer">
-          <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
-          <span>ضبط الجودة</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/risk-register`)} className="gap-2 cursor-pointer">
-          <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-          <span>سجل المخاطر</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/variation-orders`)} className="gap-2 cursor-pointer">
-          <GitBranch className="h-4 w-4 text-muted-foreground" />
-          <span>أوامر التغيير</span>
+        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/report`)} className="gap-2 cursor-pointer">
+          <Printer className="h-4 w-4 text-muted-foreground" />
+          <span>طباعة التقرير</span>
         </DropdownMenuItem>
       </DropdownMenuGroup>
       {isAdmin && (
@@ -238,11 +246,16 @@ const Projects = () => {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">المشاريع</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {type === "contracting" ? "مشاريع المقاولات" : type === "finishing" ? "مشاريع التشطيبات" : "كل المشاريع"}
+          </h1>
           <p className="text-sm text-muted-foreground">شاشة التحكم وإدارة كافة المشاريع والعمليات المرتبطة بها</p>
         </div>
         {isAdmin && (
-          <Button onClick={() => navigate("/projects/new")} className="gap-2 bg-primary hover:bg-primary/90 cursor-pointer shadow-sm">
+          <Button 
+            onClick={() => navigate(type ? `/projects/new?type=${type}` : "/projects/new")} 
+            className="gap-2 bg-primary hover:bg-primary/90 cursor-pointer shadow-sm"
+          >
             <Plus className="h-4 w-4" />
             <span>مشروع جديد</span>
           </Button>
@@ -253,25 +266,25 @@ const Projects = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="border-r-4 border-r-primary overflow-hidden shadow-sm transition-all hover:-translate-y-0.5 duration-200">
           <CardContent className="p-4 flex flex-col justify-center">
-            <p className="text-2xl font-bold text-primary font-mono">{totalProjects}</p>
+            <p className="text-2xl font-bold text-primary">{totalProjects}</p>
             <p className="text-xs text-muted-foreground font-medium mt-1">إجمالي المشاريع</p>
           </CardContent>
         </Card>
         <Card className="border-r-4 border-r-green-500 overflow-hidden shadow-sm transition-all hover:-translate-y-0.5 duration-200">
           <CardContent className="p-4 flex flex-col justify-center">
-            <p className="text-2xl font-bold text-green-500 font-mono">{activeCount}</p>
+            <p className="text-2xl font-bold text-green-500">{activeCount}</p>
             <p className="text-xs text-muted-foreground font-medium mt-1">مشاريع نشطة</p>
           </CardContent>
         </Card>
         <Card className="border-r-4 border-r-yellow-500 overflow-hidden shadow-sm transition-all hover:-translate-y-0.5 duration-200">
           <CardContent className="p-4 flex flex-col justify-center">
-            <p className="text-2xl font-bold text-yellow-500 font-mono">{pendingCount}</p>
+            <p className="text-2xl font-bold text-yellow-500">{pendingCount}</p>
             <p className="text-xs text-muted-foreground font-medium mt-1">قيد الانتظار</p>
           </CardContent>
         </Card>
         <Card className="border-r-4 border-r-blue-500 overflow-hidden shadow-sm transition-all hover:-translate-y-0.5 duration-200">
           <CardContent className="p-4 flex flex-col justify-center">
-            <p className="text-2xl font-bold text-blue-500 font-mono">{completedCount}</p>
+            <p className="text-2xl font-bold text-blue-500">{completedCount}</p>
             <p className="text-xs text-muted-foreground font-medium mt-1">مشاريع مكتملة</p>
           </CardContent>
         </Card>
@@ -290,10 +303,10 @@ const Projects = () => {
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[140px] focus:ring-primary">
+            <SelectTrigger className="w-[140px] focus:ring-primary" dir="rtl">
               <SelectValue placeholder="الحالة" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent dir="rtl">
               <SelectItem value="all">كل الحالات</SelectItem>
               <SelectItem value="active">نشط</SelectItem>
               <SelectItem value="pending">قيد الانتظار</SelectItem>
@@ -301,6 +314,18 @@ const Projects = () => {
               <SelectItem value="cancelled">ملغي</SelectItem>
             </SelectContent>
           </Select>
+          {!type && (
+            <Select value={projectTypeFilter} onValueChange={setProjectTypeFilter}>
+              <SelectTrigger className="w-[150px] focus:ring-primary" dir="rtl">
+                <SelectValue placeholder="نوع الفواتير" />
+              </SelectTrigger>
+              <SelectContent dir="rtl">
+                <SelectItem value="all">كل الأنواع</SelectItem>
+                <SelectItem value="contracting">فواتير مقاولات</SelectItem>
+                <SelectItem value="finishing">فواتير تشطيبات</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         {/* View Mode Toggle */}
@@ -340,10 +365,22 @@ const Projects = () => {
             const phases = phasesMap?.[project.id] || [];
             const isOverBudget = !isEngineer && project.budget > 0 && (project.spent || 0) > project.budget;
 
+            const totalWorkValue = projectItemsTotalMap?.[project.id] || 0;
+            const receivedAmount = projectPaymentsMap?.[project.id] || 0;
+            const remainingDue = totalWorkValue - receivedAmount;
+            const paymentRatio = totalWorkValue > 0 ? Math.round((receivedAmount / totalWorkValue) * 100) : 0;
+
+            const spentBeforeCommission = project.spent || 0;
+            const finishingPercentage = Number((project as any).finishing_percentage || 0);
+            const commissionValue = (spentBeforeCommission * finishingPercentage) / 100;
+            const totalFinishingDue = spentBeforeCommission + commissionValue;
+            const receivedFromClient = projectPaymentsMap?.[project.id] || 0;
+            const remainingFromClient = totalFinishingDue - receivedFromClient;
+
             return (
               <Card
                 key={project.id}
-                onClick={() => navigate(`/projects/${project.id}/phases`)}
+                onClick={() => navigate(project.project_type === 'finishing' ? `/projects/${project.id}/purchases` : `/projects/${project.id}/phases`)}
                 className="overflow-hidden transition-all hover:shadow-md cursor-pointer group flex flex-col border hover:border-primary/30 relative"
               >
                 {/* Project Image Header */}
@@ -363,13 +400,25 @@ const Projects = () => {
                     </div>
                   )}
                   {/* Status Overlay */}
-                  <Badge
-                    variant="outline"
-                    className={`absolute top-3 right-3 text-xs px-2.5 py-0.5 backdrop-blur-md shadow-sm border ${statusBadgeClass[project.status] || ""}`}
-                  >
-                    <span className={`h-1.5 w-1.5 rounded-full ${statusDot[project.status]} ml-1.5 inline-block`} />
-                    {statusLabels[project.status] || project.status}
-                  </Badge>
+                  <div className="absolute top-3 right-3 flex flex-col gap-1.5 items-end">
+                    <Badge
+                      variant="outline"
+                      className={`text-xs px-2.5 py-0.5 backdrop-blur-md shadow-sm border ${statusBadgeClass[project.status] || ""}`}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${statusDot[project.status]} ml-1.5 inline-block`} />
+                      {statusLabels[project.status] || project.status}
+                    </Badge>
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] px-2 py-0.5 backdrop-blur-md shadow-sm border font-medium ${
+                        project.project_type === 'finishing'
+                          ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                          : "bg-blue-500/10 text-blue-600 border-blue-500/20"
+                      }`}
+                    >
+                      {project.project_type === 'finishing' ? "تشطيبات" : "مقاولات"}
+                    </Badge>
+                  </div>
 
                   {/* Overbudget Badge */}
                   {isOverBudget && (
@@ -416,112 +465,185 @@ const Projects = () => {
                   <div className="space-y-1.5 pt-1">
                     <div className="flex justify-between text-xs">
                       <span className="text-muted-foreground">نسبة الإنجاز</span>
-                      <span className="font-semibold text-primary font-mono">{project.progress || 0}%</span>
+                      <span className="font-semibold text-primary">{project.progress || 0}%</span>
                     </div>
                     <Progress value={project.progress || 0} className="h-2 bg-muted" />
                   </div>
 
                   {/* Financial Summary */}
                   {!isEngineer && (
-                    <div className="grid grid-cols-2 gap-2 text-xs pt-3 border-t border-border/60">
-                      <div>
-                        <p className="text-muted-foreground mb-0.5">الميزانية</p>
-                        <p className="font-bold text-foreground font-mono">{formatCurrencyLYD(project.budget || 0)}</p>
+                    project.project_type === "contracting" ? (
+                      <div className="space-y-2.5 pt-3 border-t border-border/60">
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div>
+                            <p className="text-muted-foreground mb-0.5">قيمة الأعمال</p>
+                            <p className="font-bold text-foreground">
+                              {formatCurrencyLYD(totalWorkValue)}
+                            </p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-muted-foreground mb-0.5">المقبوض</p>
+                            <p className="font-bold text-green-600">
+                              {formatCurrencyLYD(receivedAmount)}
+                            </p>
+                          </div>
+                          <div className="text-left">
+                            <p className="text-muted-foreground mb-0.5">المستحق</p>
+                            <p className={`font-bold ${remainingDue > 0 ? "text-amber-600" : "text-foreground"}`}>
+                              {formatCurrencyLYD(remainingDue)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[10px]">
+                            <span className="text-muted-foreground">نسبة السداد</span>
+                            <span className="font-semibold text-green-600">{paymentRatio}%</span>
+                          </div>
+                          <Progress value={paymentRatio} className="h-1.5 bg-muted" />
+                        </div>
                       </div>
-                      <div className="text-left">
-                        <p className="text-muted-foreground mb-0.5">إجمالي المصروفات</p>
-                        <p className={`font-bold font-mono ${isOverBudget ? "text-destructive" : "text-foreground"}`}>
-                          {formatCurrencyLYD(project.spent || 0)}
-                        </p>
-                      </div>
-                    </div>
+                    ) : (
+                      project.project_type === "finishing" ? (
+                        <div className="space-y-2.5 pt-3 border-t border-border/60">
+                          <div className="grid grid-cols-3 gap-2 text-xs">
+                            <div>
+                              <p className="text-muted-foreground mb-0.5">المصروفات ({finishingPercentage}%)</p>
+                              <div className="font-bold text-foreground">
+                                {formatCurrencyLYD(spentBeforeCommission)}
+                                <span className="text-[10px] text-muted-foreground block font-normal mt-0.5" title="أتعاب الشركة">أتعاب: {formatCurrencyLYD(commissionValue)}</span>
+                              </div>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-muted-foreground mb-0.5">المستحق</p>
+                              <p className="font-bold text-primary">
+                                {formatCurrencyLYD(totalFinishingDue)}
+                              </p>
+                            </div>
+                            <div className="text-left">
+                              <p className="text-muted-foreground mb-0.5">المقبوض</p>
+                              <p className="font-bold text-green-600">
+                                {formatCurrencyLYD(receivedFromClient)}
+                              </p>
+                            </div>
+                          </div>
+                          {remainingFromClient > 0 && (
+                            <div className="text-[10.5px] text-amber-600 font-bold text-center bg-amber-500/10 rounded py-0.5">
+                              المتبقي على الزبون: {formatCurrencyLYD(remainingFromClient)}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-3 gap-2 text-xs pt-3 border-t border-border/60">
+                          <div>
+                            <p className="text-muted-foreground mb-0.5">الميزانية</p>
+                            <p className="font-bold text-foreground">
+                              {Number(project.budget) > 0 ? formatCurrencyLYD(project.budget) : "بلا ميزانية"}
+                            </p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-muted-foreground mb-0.5">المصروفات</p>
+                            <p className={`font-bold ${isOverBudget ? "text-destructive" : "text-foreground"}`}>
+                              {formatCurrencyLYD(project.spent || 0)}
+                            </p>
+                          </div>
+                          <div className="text-left">
+                            <p className="text-muted-foreground mb-0.5 flex items-center gap-1 justify-end">
+                              <CreditCard className="h-3 w-3" /> المقبوض
+                            </p>
+                            <p className="font-bold text-primary">
+                              {formatCurrencyLYD(projectPaymentsMap?.[project.id] || 0)}
+                            </p>
+                          </div>
+                        </div>
+                      )
+                    )
                   )}
 
-                  {/* Quick Access Actions */}
-                  <div className="flex gap-2 pt-3 border-t border-border/60" onClick={(e) => e.stopPropagation()}>
+                  {/* Quick Access Icons Toolbar */}
+                  <div className="flex items-center justify-between pt-3 border-t border-border/60 gap-1" onClick={(e) => e.stopPropagation()}>
                     <Button
-                      variant="default"
+                      variant="ghost"
                       size="sm"
-                      onClick={() => navigate(`/projects/${project.id}/phases`)}
-                      className="flex-1 text-xs cursor-pointer bg-primary text-primary-foreground hover:bg-primary/95"
+                      onClick={() => navigate(project.project_type === 'finishing' ? `/projects/${project.id}/items` : `/projects/${project.id}/phases`)}
+                      className="h-8 gap-1.5 rounded-full hover:bg-primary/10 hover:text-primary transition-all cursor-pointer text-muted-foreground text-xs px-3"
+                      title={project.project_type === 'finishing' ? 'البنود' : 'المراحل'}
                     >
-                      <Layers className="h-3.5 w-3.5 ml-1.5" />
-                      عرض التفاصيل
+                      <Layers className="h-3.5 w-3.5" />
+                      {project.project_type === 'finishing' ? 'البنود' : 'المراحل'}
                     </Button>
-
+                    {!isEngineer && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate(`/projects/${project.id}/report`)}
+                        className="h-8 w-8 rounded-full hover:bg-primary/10 hover:text-primary transition-all cursor-pointer text-muted-foreground"
+                        title="طباعة التقرير"
+                      >
+                        <Printer className="h-4 w-4" />
+                      </Button>
+                    )}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" className="px-2.5 cursor-pointer" title="انتقال سريع">
-                          <MoreHorizontal className="h-4 w-4 ml-1" />
-                          <span>انتقال سريع</span>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-accent transition-all cursor-pointer text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                          <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       {renderQuickNavMenu(project.id)}
                     </DropdownMenu>
-
-                    {!isEngineer && (
-                      <Button
-                        variant="secondary"
-                        size="icon"
-                        onClick={() => navigate(`/projects/${project.id}/report`)}
-                        className="h-8 w-8 cursor-pointer shrink-0"
-                        title="طباعة التقرير"
-                      >
-                        <Printer className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
                   </div>
 
-                  {/* Collapsible Phases */}
-                  <Collapsible
-                    open={isExpanded}
-                    onOpenChange={() => toggleProject(project.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="pt-1"
-                  >
-                    <CollapsibleTrigger asChild>
-                      <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-2 rounded-md hover:bg-accent/40 cursor-pointer">
-                        {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                        <span>مراحل المشروع</span>
-                      </div>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <div className="mt-2 space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
-                        {phases.length > 0 ? (
-                          phases.map((phase) => (
-                            <div
-                              key={phase.id}
-                              className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/40 hover:bg-accent/50 cursor-pointer transition-colors"
-                              onClick={() => navigate(`/projects/${project.id}/phases/${phase.id}/items`)}
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${statusDot[phase.status] || statusDot.pending}`} />
-                                <span className="text-xs font-medium truncate">{phase.name}</span>
-                              </div>
-                              <Badge
-                                variant="outline"
-                                className={`text-[9px] px-1.5 py-0 shrink-0 border-0 ${statusBadgeClass[phase.status] || ""}`}
+                  {/* Collapsible Phases for Contracting Projects */}
+                  {project.project_type !== "finishing" && (
+                    <Collapsible
+                      open={isExpanded}
+                      onOpenChange={() => toggleProject(project.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="pt-1 animate-in fade-in duration-200"
+                    >
+                      <CollapsibleTrigger asChild>
+                        <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-2 rounded-md hover:bg-accent/40 cursor-pointer">
+                          {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                          <span>مراحل المشروع</span>
+                        </div>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="mt-2 space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                          {phases.length > 0 ? (
+                            phases.map((phase) => (
+                              <div
+                                key={phase.id}
+                                className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/40 hover:bg-accent/50 cursor-pointer transition-colors"
+                                onClick={() => navigate(`/projects/${project.id}/phases/${phase.id}/items`)}
                               >
-                                {statusLabels[phase.status] || phase.status}
-                              </Badge>
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${statusDot[phase.status] || statusDot.pending}`} />
+                                  <span className="text-xs font-medium truncate">{phase.name}</span>
+                                </div>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[9px] px-1.5 py-0 shrink-0 border-0 ${statusBadgeClass[phase.status] || ""}`}
+                                >
+                                  {statusLabels[phase.status] || phase.status}
+                                </Badge>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-center py-4 bg-muted/20 rounded-md">
+                              <p className="text-xs text-muted-foreground">لا توجد مراحل مسجلة</p>
+                              {isAdmin && (
+                                <Link to={`/projects/${project.id}/phases`} onClick={(e) => e.stopPropagation()}>
+                                  <span className="text-xs text-primary hover:underline mt-1 inline-flex items-center gap-1 justify-center cursor-pointer">
+                                    <Plus className="h-3 w-3" />
+                                    إضافة أول مرحلة
+                                  </span>
+                                </Link>
+                              )}
                             </div>
-                          ))
-                        ) : (
-                          <div className="text-center py-4 bg-muted/20 rounded-md">
-                            <p className="text-xs text-muted-foreground">لا توجد مراحل مسجلة</p>
-                            {isAdmin && (
-                              <Link to={`/projects/${project.id}/phases`} onClick={(e) => e.stopPropagation()}>
-                                <span className="text-xs text-primary hover:underline mt-1 inline-flex items-center gap-1 justify-center cursor-pointer">
-                                  <Plus className="h-3 w-3" />
-                                  إضافة أول مرحلة
-                                </span>
-                              </Link>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
+                          )}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )}
                 </CardContent>
               </Card>
             );
@@ -551,11 +673,22 @@ const Projects = () => {
               <TableBody>
                 {filteredProjects?.map((project) => {
                   const isOverBudget = !isEngineer && project.budget > 0 && (project.spent || 0) > project.budget;
+                  const totalWorkValue = projectItemsTotalMap?.[project.id] || 0;
+                  const receivedAmount = projectPaymentsMap?.[project.id] || 0;
+                  const remainingDue = totalWorkValue - receivedAmount;
+                  const paymentRatio = totalWorkValue > 0 ? Math.round((receivedAmount / totalWorkValue) * 100) : 0;
+
+                  const spentBeforeCommission = project.spent || 0;
+                  const finishingPercentage = Number((project as any).finishing_percentage || 0);
+                  const commissionValue = (spentBeforeCommission * finishingPercentage) / 100;
+                  const totalFinishingDue = spentBeforeCommission + commissionValue;
+                  const receivedFromClient = projectPaymentsMap?.[project.id] || 0;
+                  const remainingFromClient = totalFinishingDue - receivedFromClient;
 
                   return (
                     <TableRow
                       key={project.id}
-                      onClick={() => navigate(`/projects/${project.id}/phases`)}
+                      onClick={() => navigate(project.project_type === 'finishing' ? `/projects/${project.id}/purchases` : `/projects/${project.id}/phases`)}
                       className="cursor-pointer hover:bg-muted/30 transition-colors group"
                     >
                       <TableCell className="font-medium">
@@ -563,10 +696,22 @@ const Projects = () => {
                           <p className="font-bold text-foreground group-hover:text-primary transition-colors text-sm">
                             {project.name}
                           </p>
-                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                            <Building className="h-3 w-3 shrink-0" />
-                            {project.clients?.name || "عميل غير محدد"}
-                          </p>
+                          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Building className="h-3 w-3 shrink-0" />
+                              {project.clients?.name || "عميل غير محدد"}
+                            </span>
+                            <Badge
+                              variant="outline"
+                              className={`text-[9px] px-1.5 py-0 border font-medium ${
+                                project.project_type === 'finishing'
+                                  ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                                  : "bg-blue-500/10 text-blue-600 border-blue-500/20"
+                              }`}
+                            >
+                              {project.project_type === 'finishing' ? "تشطيبات" : "مقاولات"}
+                            </Badge>
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
@@ -592,21 +737,51 @@ const Projects = () => {
                       <TableCell>
                         <div className="flex items-center gap-2 max-w-[160px]">
                           <Progress value={project.progress || 0} className="h-2 flex-1 bg-muted" />
-                          <span className="text-xs font-bold font-mono text-primary">{project.progress || 0}%</span>
+                          <span className="text-xs font-bold text-primary">{project.progress || 0}%</span>
                         </div>
                       </TableCell>
                       {!isEngineer && (
-                        <>
-                          <TableCell className="font-mono text-xs font-semibold">
-                            {formatCurrencyLYD(project.budget || 0)}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs font-semibold">
-                            <span className={isOverBudget ? "text-destructive font-bold flex items-center gap-1" : "text-foreground"}>
-                              {formatCurrencyLYD(project.spent || 0)}
-                              {isOverBudget && <AlertTriangle className="h-3.5 w-3.5 shrink-0 animate-bounce" title="تجاوز الميزانية!" />}
-                            </span>
-                          </TableCell>
-                        </>
+                        project.project_type === "contracting" ? (
+                          <>
+                            <TableCell className="text-xs font-semibold">
+                              {formatCurrencyLYD(totalWorkValue)}
+                              <span className="text-[10px] text-muted-foreground block font-normal mt-0.5">قيمة الأعمال</span>
+                            </TableCell>
+                            <TableCell className="text-xs font-semibold">
+                              <span className={remainingDue > 0 ? "text-amber-600 font-bold" : "text-foreground font-semibold"}>
+                                {formatCurrencyLYD(remainingDue)}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground block font-normal mt-0.5">المستحق (سداد: {paymentRatio}%)</span>
+                            </TableCell>
+                          </>
+                        ) : project.project_type === "finishing" ? (
+                          <>
+                            <TableCell className="text-xs font-semibold">
+                              {formatCurrencyLYD(spentBeforeCommission)}
+                              <span className="text-[10px] text-muted-foreground block font-normal mt-0.5">المصروفات ({finishingPercentage}%)</span>
+                            </TableCell>
+                            <TableCell className="text-xs font-semibold">
+                              <span className="text-primary font-bold">
+                                {formatCurrencyLYD(totalFinishingDue)}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground block font-normal mt-0.5" title={`المقبوض: ${formatCurrencyLYD(receivedFromClient)}`}>المستحق (متبقي: {formatCurrencyLYD(remainingFromClient)})</span>
+                            </TableCell>
+                          </>
+                        ) : (
+                          <>
+                            <TableCell className="text-xs font-semibold">
+                              {Number(project.budget) > 0 ? formatCurrencyLYD(project.budget) : "بلا ميزانية"}
+                              <span className="text-[10px] text-muted-foreground block font-normal mt-0.5">الميزانية</span>
+                            </TableCell>
+                            <TableCell className="text-xs font-semibold">
+                              <span className={isOverBudget ? "text-destructive font-bold flex items-center gap-1" : "text-foreground"}>
+                                {formatCurrencyLYD(project.spent || 0)}
+                                {isOverBudget && <AlertTriangle className="h-3.5 w-3.5 shrink-0 animate-bounce" title="تجاوز الميزانية!" />}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground block font-normal mt-0.5">المصروفات</span>
+                            </TableCell>
+                          </>
+                        )
                       )}
                       <TableCell>
                         <Badge

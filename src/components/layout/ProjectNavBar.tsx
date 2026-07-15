@@ -12,7 +12,6 @@ import {
   FileText,
   Wrench,
   Coins,
-  Wallet,
   FolderKanban,
   CalendarDays,
   AlertTriangle,
@@ -44,25 +43,23 @@ type NavTab = {
 };
 
 const getProjectTabs = (projectId: string, phaseId?: string): NavTab[] => {
-  const base = `/projects/${projectId}`;
-  const phaseBase = phaseId ? `${base}/phases/${phaseId}` : null;
+  const base = phaseId ? `/projects/${projectId}/phases/${phaseId}` : `/projects/${projectId}`;
+
+  if (!phaseId) {
+    return [
+      { name: "المراحل", href: `/projects/${projectId}/phases`, icon: Layers, group: "main" },
+      { name: "العقود", href: `/projects/${projectId}/contracts`, icon: Receipt, group: "finance" },
+    ];
+  }
 
   return [
-    // Main tabs
-    { name: "المراحل", href: `${base}/phases`, icon: Layers, group: "main" },
-    { name: "البنود", href: phaseBase ? `${phaseBase}/items` : `${base}/items`, icon: Package, group: "main" },
+    { name: "البنود", href: `${base}/items`, icon: Package, group: "main" },
     { name: "نسب الإنجاز", href: `${base}/progress`, icon: TrendingUp, group: "main" },
     // Finance
-    { name: "المشتريات", href: phaseBase ? `${phaseBase}/purchases` : `${base}/purchases`, icon: ShoppingCart, group: "finance" },
-    { name: "المصروفات", href: phaseBase ? `${phaseBase}/expenses` : `${base}/expenses`, icon: Coins, group: "finance" },
-    { name: "المدفوعات", href: `${base}/payments`, icon: Wallet, group: "finance" },
+    { name: "المشتريات", href: `${base}/purchases`, icon: ShoppingCart, group: "finance" },
+    { name: "المصروفات", href: `${base}/expenses`, icon: Coins, group: "finance" },
     { name: "العقود", href: `${base}/contracts`, icon: Receipt, group: "finance" },
-    { name: "المعدات", href: phaseBase ? `${phaseBase}/equipment` : `${base}/equipment`, icon: Wrench, group: "finance" },
-    // Management
-    { name: "الجدولة", href: `${base}/schedule`, icon: CalendarDays, group: "management" },
-    { name: "المخاطر", href: `${base}/risk-register`, icon: AlertTriangle, group: "management" },
-    { name: "ضبط الجودة", href: `${base}/quality`, icon: ClipboardCheck, group: "management" },
-    { name: "أوامر التغيير", href: `${base}/variation-orders`, icon: GitBranch, group: "management" },
+    { name: "المعدات", href: `${base}/equipment`, icon: Wrench, group: "finance" },
   ];
 };
 
@@ -78,7 +75,7 @@ export function ProjectNavBar() {
       if (!id) return null;
       const { data } = await supabase
         .from("projects")
-        .select("name, client_id, clients(name)")
+        .select("name, project_type, client_id, clients(name)")
         .eq("id", id)
         .single();
       return data;
@@ -86,16 +83,16 @@ export function ProjectNavBar() {
     enabled: !!id,
     staleTime: 60000,
   });
-
-  const { data: phase } = useQuery({
-    queryKey: ["phase-name", phaseId],
+  const { data: currentPhase } = useQuery({
+    queryKey: ["project-phase-name", phaseId],
     queryFn: async () => {
       if (!phaseId) return null;
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("project_phases")
         .select("name")
         .eq("id", phaseId)
         .single();
+      if (error) throw error;
       return data;
     },
     enabled: !!phaseId,
@@ -106,8 +103,14 @@ export function ProjectNavBar() {
 
   const allTabs = getProjectTabs(id, phaseId);
 
-  // Filter tabs by role
+  const isFinishing = (project as any)?.project_type === "finishing";
+
+  // Filter tabs by role and project type
   const visibleTabs = allTabs.filter((tab) => {
+    if (isFinishing) {
+      // Finishing projects only care about purchases and expenses
+      return tab.name === "المشتريات" || tab.name === "المصروفات";
+    }
     if (isEngineer) {
       // Engineers can see main tabs but not finance (except equipment)
       return tab.group === "main" || tab.name === "المعدات" || tab.group === "management";
@@ -129,15 +132,13 @@ export function ProjectNavBar() {
   const clientName = (project as any)?.clients?.name;
 
   const getBackPath = () => {
-    if (phaseId) return `/projects/${id}/phases`;
-    if (clientName) return `/projects/client/${(project as any)?.client_id}`;
-    return "/projects";
+    if (isFinishing) return "/projects/finishing";
+    return "/projects/contracting";
   };
 
   const getBackLabel = () => {
-    if (phaseId) return "المراحل";
-    if (clientName) return clientName;
-    return "المشاريع";
+    if (isFinishing) return "مشاريع التشطيبات";
+    return "مشاريع المقاولات";
   };
 
   const isManagementTabActive = managementTabs.some((t) => isTabActive(t));
@@ -182,17 +183,17 @@ export function ProjectNavBar() {
 
             <ChevronRight className="h-3 w-3 shrink-0" />
             <Link
-              to={`/projects/${id}/phases`}
+              to={isFinishing ? `/projects/${id}/purchases` : `/projects/${id}/phases`}
               className="hover:text-primary transition-colors font-semibold text-foreground truncate max-w-[160px] cursor-pointer"
             >
               {project?.name || "..."}
             </Link>
 
-            {phase && phaseId && (
+            {phaseId && (
               <>
                 <ChevronRight className="h-3 w-3 shrink-0" />
-                <span className="text-foreground font-medium truncate max-w-[120px]">
-                  {phase.name}
+                <span className="text-foreground font-semibold truncate max-w-[120px]">
+                  {currentPhase?.name || "..."}
                 </span>
               </>
             )}
@@ -304,6 +305,29 @@ export function ProjectNavBar() {
           <ScrollBar orientation="horizontal" />
         </ScrollArea>
       </div>
+
+      {phaseId && currentPhase && (
+        <div className="flex items-center justify-between gap-3 p-3 bg-[#d6ac40]/10 border border-[#d6ac40]/20 rounded-lg text-sm mb-4 animate-in fade-in duration-300">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="p-1.5 bg-[#d6ac40]/20 rounded-md shrink-0">
+              <Layers className="h-4 w-4 text-[#b8860b] dark:text-[#d6ac40]" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] text-[#b8860b] dark:text-[#d6ac40] font-bold">أنت تتصفح حالياً مرحلة:</p>
+              <h4 className="font-bold text-foreground truncate">{currentPhase.name}</h4>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate(`/projects/${id}/phases`)}
+            className="h-8 shrink-0 text-xs gap-1 border-[#d6ac40]/30 hover:bg-[#d6ac40]/10 hover:text-[#b8860b] cursor-pointer"
+          >
+            <ArrowRight className="h-3.5 w-3.5" />
+            العودة لصفحة المراحل
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

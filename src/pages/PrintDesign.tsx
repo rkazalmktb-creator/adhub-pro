@@ -260,6 +260,7 @@ const PrintDesign = () => {
   // Print labels state
   const [printLabels, setPrintLabels] = useState<PrintLabelsConfig>(JSON.parse(JSON.stringify(DEFAULT_PRINT_LABELS)));
   const [activeElementTab, setActiveElementTab] = useState<string>("purchases");
+  const [activeLeftTab, setActiveLeftTab] = useState<string>("company");
 
   // Company details
   const [companyName, setCompanyName] = useState("");
@@ -700,7 +701,7 @@ const PrintDesign = () => {
         {!sidebarCollapsed && (
           <ScrollArea className="flex-1">
             <div className="p-4">
-              <Tabs defaultValue="company" className="w-full">
+              <Tabs value={activeLeftTab} onValueChange={setActiveLeftTab} className="w-full">
                 <TabsList className="w-full grid grid-cols-7 mb-4">
                   <TabsTrigger value="company" className="text-xs px-1" title="معلومات الشركة">
                     <Building2 className="h-4 w-4" />
@@ -1985,6 +1986,9 @@ const PrintDesign = () => {
               const scaledHeaderFontSizeMeta = headerFontSizeMeta * zoomFactor;
               const scaledFooterFontSize = footerFontSize * zoomFactor;
               const scaledHeaderLogoHeight = headerLogoHeight * zoomFactor;
+              const showContractPreview = activeLeftTab === "contracts_config" || (activeLeftTab === "elements" && activeElementTab === "contracts");
+              const scaledContractFontSizeTitle = (contractFontSizeTitle || 18) * zoomFactor;
+              const scaledContractFontSizeBody = (contractFontSizeBody || 11) * zoomFactor;
 
               return (
                 <>
@@ -2118,144 +2122,270 @@ const PrintDesign = () => {
                     }}
                   >
                     <div>
-                      {/* Section Title */}
-                      <div 
-                        style={{ 
-                          color: sectionTitleColor,
-                          fontSize: `${scaledTitleFontSize}px`,
-                          fontWeight: 'bold',
-                          borderBottom: `2px solid ${sectionTitleColor}`,
-                          paddingBottom: '8px',
-                          marginBottom: '16px',
-                        }}
-                      >
-                        بنود المشروع
-                      </div>
+                      {showContractPreview ? (
+                        <div style={{ fontSize: `${scaledContractFontSizeBody}px`, direction: 'rtl', padding: '10px' }}>
+                          {/* Contract Title Block */}
+                          <div style={{ textAlign: 'center', marginBottom: '24px', paddingBottom: '12px', borderBottom: `2px dashed ${contractAccent || '#c6973f'}` }}>
+                            <h1 style={{ fontSize: `${scaledContractFontSizeTitle}px`, fontWeight: 'bold', color: contractAccent || '#c6973f', margin: 0 }}>
+                              {contractTitleText || "عـقـد مـقـاولـة"}
+                            </h1>
+                          </div>
 
-                      {/* Sample Table */}
-                      <table 
-                        style={{ 
-                          width: '100%', 
-                          borderCollapse: 'separate',
-                          borderSpacing: 0,
-                          border: `${borderWidth}px solid ${tableBorderColor}`,
-                          borderRadius: `${borderRadius}px`,
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <thead>
-                          <tr style={{ backgroundColor: tableHeaderColor }}>
-                            {['البند', 'الكمية', 'الوحدة', 'سعر الوحدة', 'الإجمالي'].map((header, i) => (
-                              <th 
-                                key={i}
-                                style={{ 
-                                  padding: `${scaledCellPadding}px`,
-                                  color: headerTextColor,
-                                  fontSize: `${scaledHeaderFontSize}px`,
-                                  fontWeight: 'bold',
-                                  textAlign: 'center',
-                                  borderBottom: `${borderWidth}px solid ${tableBorderColor}`,
-                                }}
-                              >
-                                {header}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sampleTableData.map((row, idx) => (
-                            <tr 
-                              key={idx}
-                              style={{ 
-                                backgroundColor: idx % 2 === 0 ? tableRowEvenColor : tableRowOddColor,
-                              }}
-                            >
-                              <td style={{ 
-                                padding: `${scaledCellPadding}px`, 
-                                color: tableTextColor,
-                                fontSize: `${scaledTableFontSize}px`,
-                                textAlign: 'center',
-                                verticalAlign: 'middle',
-                                borderBottom: `${borderWidth}px solid ${tableBorderColor}`,
+                          {/* Project & Client Cards */}
+                          {contractShowProjectInfo && (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
+                              <div style={{ gridColumn: 'span 2', border: `1.5px solid ${contractAccent || '#c6973f'}`, borderRadius: '6px', overflow: 'hidden' }}>
+                                <div style={{ backgroundColor: contractHeaderBg || '#1a365d', color: contractHeaderText || '#ffffff', fontSize: `${scaledContractFontSizeBody - 2}px`, padding: '4px 10px', fontWeight: 'bold' }}>
+                                  وصف الأعمال والتمهيد
+                                </div>
+                                <div style={{ padding: '8px', color: '#333', fontSize: `${scaledContractFontSizeBody - 1}px`, backgroundColor: '#fafafa' }}>
+                                  يتعهد المقاول بتنفيذ أعمال الهيكل الخرساني والإنشاءات للمبنى السكني التجاري المتفق عليه مع الطرف الأول.
+                                </div>
+                              </div>
+                              <div style={{ border: `1.5px solid ${contractAccent || '#c6973f'}`, borderRadius: '6px', overflow: 'hidden' }}>
+                                <div style={{ backgroundColor: contractHeaderBg || '#1a365d', color: contractHeaderText || '#ffffff', fontSize: `${scaledContractFontSizeBody - 2}px`, padding: '4px 10px', fontWeight: 'bold' }}>
+                                  الطرف الأول (الشركة)
+                                </div>
+                                <div style={{ padding: '8px', color: '#333', fontSize: `${scaledContractFontSizeBody - 1}px`, backgroundColor: '#fafafa' }}>
+                                  شركة ركاز العقارية
+                                </div>
+                              </div>
+                              <div style={{ border: `1.5px solid ${contractAccent || '#c6973f'}`, borderRadius: '6px', overflow: 'hidden' }}>
+                                <div style={{ backgroundColor: contractHeaderBg || '#1a365d', color: contractHeaderText || '#ffffff', fontSize: `${scaledContractFontSizeBody - 2}px`, padding: '4px 10px', fontWeight: 'bold' }}>
+                                  الطرف الثاني (العميل)
+                                </div>
+                                <div style={{ padding: '8px', color: '#333', fontSize: `${scaledContractFontSizeBody - 1}px`, backgroundColor: '#fafafa' }}>
+                                  ناصر ابراهيم الدويبي
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Clauses Section */}
+                          {contractShowClauses && (
+                            <div style={{ marginBottom: '20px' }}>
+                              <div style={{ borderRight: `4px solid ${contractAccent || '#c6973f'}`, paddingRight: '8px', marginBottom: '10px', color: contractAccent || '#c6973f', fontWeight: 'bold', fontSize: `${scaledContractFontSizeBody + 1}px` }}>
+                                شروط وأحكام العقد العامة
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                <div style={{ display: 'flex', gap: '10px', fontSize: `${scaledContractFontSizeBody - 1}px` }}>
+                                  <div style={{ minWidth: '20px', height: '20px', borderRadius: '50%', border: `1.5px solid ${contractAccent || '#c6973f'}`, backgroundColor: '#fdfbf7', color: contractAccent || '#c6973f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '9px' }}>١</div>
+                                  <div><strong>التمهيد والالتزام:</strong> يعتبر التمهيد جزءاً لا يتجزأ من هذا العقد وشروطه ملزمة لكلا الطرفين.</div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '10px', fontSize: `${scaledContractFontSizeBody - 1}px` }}>
+                                  <div style={{ minWidth: '20px', height: '20px', borderRadius: '50%', border: `1.5px solid ${contractAccent || '#c6973f'}`, backgroundColor: '#fdfbf7', color: contractAccent || '#c6973f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '9px' }}>٢</div>
+                                  <div><strong>المواصفات القياسية:</strong> تتم كافة الأعمال طبقاً للرسومات الهندسية المعتمدة وتحت إشراف المهندس المعين.</div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Table of Items */}
+                          {contractShowItemsTable && (
+                            <div style={{ marginBottom: '20px' }}>
+                              <div style={{ borderRight: `4px solid ${contractAccent || '#c6973f'}`, paddingRight: '8px', marginBottom: '10px', color: contractAccent || '#c6973f', fontWeight: 'bold', fontSize: `${scaledContractFontSizeBody + 1}px` }}>
+                                الفئات والأسعار المتفق عليها
+                              </div>
+                              <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, border: `1.5px solid ${contractAccent || '#c6973f'}`, borderRadius: '6px', overflow: 'hidden', fontSize: `${scaledContractFontSizeBody - 1}px` }}>
+                                <thead>
+                                  <tr style={{ backgroundColor: contractHeaderBg || '#1a365d', color: contractHeaderText || '#ffffff' }}>
+                                    <th style={{ padding: '6px', borderBottom: `1.5px solid ${contractAccent || '#c6973f'}`, fontWeight: 'bold', textAlign: 'center', width: '10%' }}>ر.م</th>
+                                    <th style={{ padding: '6px', borderBottom: `1.5px solid ${contractAccent || '#c6973f'}`, fontWeight: 'bold', textAlign: 'right', width: '65%' }}>بيان البنود والأعمال</th>
+                                    <th style={{ padding: '6px', borderBottom: `1.5px solid ${contractAccent || '#c6973f'}`, fontWeight: 'bold', textAlign: 'center', width: '25%' }}>سعر الوحدة المتفق عليه</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr style={{ backgroundColor: '#ffffff' }}>
+                                    <td style={{ padding: '6px', borderBottom: '1px solid #eee', textAlign: 'center' }}>١</td>
+                                    <td style={{ padding: '6px', borderBottom: '1px solid #eee', textAlign: 'right', fontWeight: 'bold' }}>الأعمدة (خرسانة مسلحة)</td>
+                                    <td style={{ padding: '6px', borderBottom: '1px solid #eee', textAlign: 'center', fontWeight: 'bold', color: '#16a34a' }}>١٧٠ د.ل</td>
+                                  </tr>
+                                  <tr style={{ backgroundColor: '#fdfdfd' }}>
+                                    <td style={{ padding: '6px', borderBottom: '1px solid #eee', textAlign: 'center' }}>٢</td>
+                                    <td style={{ padding: '6px', borderBottom: '1px solid #eee', textAlign: 'right', fontWeight: 'bold' }}>الكمر الساقط</td>
+                                    <td style={{ padding: '6px', borderBottom: '1px solid #eee', textAlign: 'center', fontWeight: 'bold', color: '#16a34a' }}>١٧٠ د.ل</td>
+                                  </tr>
+                                  <tr style={{ backgroundColor: '#ffffff' }}>
+                                    <td style={{ padding: '6px', borderBottom: '1px solid #eee', textAlign: 'center' }}>٣</td>
+                                    <td style={{ padding: '6px', borderBottom: '1px solid #eee', textAlign: 'right', fontWeight: 'bold' }}>حوائط المصعد</td>
+                                    <td style={{ padding: '6px', borderBottom: '1px solid #eee', textAlign: 'center', fontWeight: 'bold', color: '#16a34a' }}>١٧٠ د.ل</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {/* Signatures Section */}
+                          {contractShowSignatures && (
+                            <div style={{ marginTop: '20px' }}>
+                              <div style={{ borderRight: `4px solid ${contractAccent || '#c6973f'}`, paddingRight: '8px', marginBottom: '10px', color: contractAccent || '#c6973f', fontWeight: 'bold', fontSize: `${scaledContractFontSizeBody + 1}px` }}>
+                                التوقيعات والاعتماد
+                              </div>
+                              <div style={{ display: 'flex', gap: '12px' }}>
+                                <div style={{ flex: 1, border: `1.5px solid ${contractAccent || '#c6973f'}`, borderRadius: '6px', overflow: 'hidden', textAlign: 'center', backgroundColor: '#ffffff' }}>
+                                  <div style={{ backgroundColor: contractHeaderBg || '#1a365d', color: contractHeaderText || '#ffffff', padding: '4px', fontWeight: 'bold', fontSize: `${scaledContractFontSizeBody - 2}px` }}>
+                                    {contractSigLabel1 || "الطرف الأول"}
+                                  </div>
+                                  <div style={{ padding: '8px' }}>
+                                    <div style={{ fontWeight: 'bold', fontSize: `${scaledContractFontSizeBody - 1}px`, marginBottom: '12px' }}>مجموعة ركاز العقارية</div>
+                                    <div style={{ borderTop: '1px dashed #ccc', height: '24px', marginTop: '10px' }} />
+                                  </div>
+                                </div>
+                                <div style={{ flex: 1, border: `1.5px solid ${contractAccent || '#c6973f'}`, borderRadius: '6px', overflow: 'hidden', textAlign: 'center', backgroundColor: '#ffffff' }}>
+                                  <div style={{ backgroundColor: contractHeaderBg || '#1a365d', color: contractHeaderText || '#ffffff', padding: '4px', fontWeight: 'bold', fontSize: `${scaledContractFontSizeBody - 2}px` }}>
+                                    {contractSigLabel2 || "الطرف الثاني"}
+                                  </div>
+                                  <div style={{ padding: '8px' }}>
+                                    <div style={{ fontWeight: 'bold', fontSize: `${scaledContractFontSizeBody - 1}px`, marginBottom: '12px' }}>ناصر ابراهيم الدويبي</div>
+                                    <div style={{ borderTop: '1px dashed #ccc', height: '24px', marginTop: '10px' }} />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          {/* Section Title */}
+                          <div 
+                            style={{ 
+                              color: sectionTitleColor,
+                              fontSize: `${scaledTitleFontSize}px`,
+                              fontWeight: 'bold',
+                              borderBottom: `2px solid ${sectionTitleColor}`,
+                              paddingBottom: '8px',
+                              marginBottom: '16px',
+                            }}
+                          >
+                            بنود المشروع
+                          </div>
+
+                          {/* Sample Table */}
+                          <table 
+                            style={{ 
+                              width: '100%', 
+                              borderCollapse: 'separate',
+                              borderSpacing: 0,
+                              border: `${borderWidth}px solid ${tableBorderColor}`,
+                              borderRadius: `${borderRadius}px`,
+                              overflow: 'hidden',
+                            }}
+                          >
+                            <thead>
+                              <tr style={{ backgroundColor: tableHeaderColor }}>
+                                {['البند', 'الكمية', 'الوحدة', 'سعر الوحدة', 'الإجمالي'].map((header, i) => (
+                                  <th 
+                                    key={i}
+                                    style={{ 
+                                      padding: `${scaledCellPadding}px`,
+                                      color: headerTextColor,
+                                      fontSize: `${scaledHeaderFontSize}px`,
+                                      fontWeight: 'bold',
+                                      textAlign: 'center',
+                                      borderBottom: `${borderWidth}px solid ${tableBorderColor}`,
+                                    }}
+                                  >
+                                    {header}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sampleTableData.map((row, idx) => (
+                                <tr 
+                                  key={idx}
+                                  style={{ 
+                                    backgroundColor: idx % 2 === 0 ? tableRowEvenColor : tableRowOddColor,
+                                  }}
+                                >
+                                  <td style={{ 
+                                    padding: `${scaledCellPadding}px`, 
+                                    color: tableTextColor,
+                                    fontSize: `${scaledTableFontSize}px`,
+                                    textAlign: 'center',
+                                    verticalAlign: 'middle',
+                                    borderBottom: `${borderWidth}px solid ${tableBorderColor}`,
+                                  }}>
+                                    {row.name}
+                                  </td>
+                                  <td style={{ 
+                                    padding: `${scaledCellPadding}px`, 
+                                    color: tableTextColor,
+                                    fontSize: `${scaledTableFontSize}px`,
+                                    textAlign: 'center',
+                                    verticalAlign: 'middle',
+                                    borderBottom: `${borderWidth}px solid ${tableBorderColor}`,
+                                  }}>
+                                    {row.quantity}
+                                  </td>
+                                  <td style={{ 
+                                    padding: `${scaledCellPadding}px`, 
+                                    color: tableTextColor,
+                                    fontSize: `${scaledTableFontSize}px`,
+                                    textAlign: 'center',
+                                    verticalAlign: 'middle',
+                                    borderBottom: `${borderWidth}px solid ${tableBorderColor}`,
+                                  }}>
+                                    {row.unit}
+                                  </td>
+                                  <td style={{ 
+                                    padding: `${scaledCellPadding}px`, 
+                                    color: tableTextColor,
+                                    fontSize: `${scaledTableFontSize}px`,
+                                    textAlign: 'center',
+                                    verticalAlign: 'middle',
+                                    borderBottom: `${borderWidth}px solid ${tableBorderColor}`,
+                                  }}>
+                                    {row.price}
+                                  </td>
+                                  <td style={{ 
+                                    padding: `${scaledCellPadding}px`, 
+                                    color: tableTextColor,
+                                    fontSize: `${scaledTableFontSize}px`,
+                                    textAlign: 'center',
+                                    verticalAlign: 'middle',
+                                    fontWeight: 'bold',
+                                    borderBottom: `${borderWidth}px solid ${tableBorderColor}`,
+                                  }}>
+                                    {row.total}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr style={{ 
+                                backgroundColor: totalsBgColor,
+                                borderTop: `2px double ${tableBorderColor}`,
+                                borderBottom: `2px double ${tableBorderColor}`,
                               }}>
-                                {row.name}
-                              </td>
-                              <td style={{ 
-                                padding: `${scaledCellPadding}px`, 
-                                color: tableTextColor,
-                                fontSize: `${scaledTableFontSize}px`,
-                                textAlign: 'center',
-                                verticalAlign: 'middle',
-                                borderBottom: `${borderWidth}px solid ${tableBorderColor}`,
-                              }}>
-                                {row.quantity}
-                              </td>
-                              <td style={{ 
-                                padding: `${scaledCellPadding}px`, 
-                                color: tableTextColor,
-                                fontSize: `${scaledTableFontSize}px`,
-                                textAlign: 'center',
-                                verticalAlign: 'middle',
-                                borderBottom: `${borderWidth}px solid ${tableBorderColor}`,
-                              }}>
-                                {row.unit}
-                              </td>
-                              <td style={{ 
-                                padding: `${scaledCellPadding}px`, 
-                                color: tableTextColor,
-                                fontSize: `${scaledTableFontSize}px`,
-                                textAlign: 'center',
-                                verticalAlign: 'middle',
-                                borderBottom: `${borderWidth}px solid ${tableBorderColor}`,
-                              }}>
-                                {row.price}
-                              </td>
-                              <td style={{ 
-                                padding: `${scaledCellPadding}px`, 
-                                color: tableTextColor,
-                                fontSize: `${scaledTableFontSize}px`,
-                                textAlign: 'center',
-                                verticalAlign: 'middle',
-                                fontWeight: 'bold',
-                                borderBottom: `${borderWidth}px solid ${tableBorderColor}`,
-                              }}>
-                                {row.total}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr style={{ 
-                            backgroundColor: totalsBgColor,
-                            borderTop: `2px double ${tableBorderColor}`,
-                            borderBottom: `2px double ${tableBorderColor}`,
-                          }}>
-                            <td 
-                              colSpan={4} 
-                              style={{ 
-                                padding: `${scaledCellPadding}px`,
-                                color: totalsTextColor,
-                                fontSize: `${scaledTableFontSize + 1}px`,
-                                fontWeight: '800',
-                                textAlign: 'left',
-                              }}
-                            >
-                              الإجمالي الكلي
-                            </td>
-                            <td 
-                              style={{ 
-                                padding: `${scaledCellPadding}px`,
-                                color: totalsTextColor,
-                                fontSize: `${scaledTableFontSize + 1}px`,
-                                fontWeight: '800',
-                                textAlign: 'center',
-                              }}
-                            >
-                              14,550.00
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
+                                <td 
+                                  colSpan={4} 
+                                  style={{ 
+                                    padding: `${scaledCellPadding}px`,
+                                    color: totalsTextColor,
+                                    fontSize: `${scaledTableFontSize + 1}px`,
+                                    fontWeight: '800',
+                                    textAlign: 'left',
+                                  }}
+                                >
+                                  الإجمالي الكلي
+                                </td>
+                                <td 
+                                  style={{ 
+                                    padding: `${scaledCellPadding}px`,
+                                    color: totalsTextColor,
+                                    fontSize: `${scaledTableFontSize + 1}px`,
+                                    fontWeight: '800',
+                                    textAlign: 'center',
+                                  }}
+                                >
+                                  14,550.00
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </>
+                      )}
                     </div>
                   </div>
 

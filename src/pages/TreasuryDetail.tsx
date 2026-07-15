@@ -36,7 +36,10 @@ const translateSource = (source: string | null): string => {
   if (!source) return "";
   const map: Record<string, string> = {
     purchase: "مشتريات",
+    purchase_payments: "مدفوعات المشتريات",
     client_payment: "تسديد من الزبون",
+    client_payments: "مدفوعات الزبائن",
+    project_payments: "دفعات المشاريع",
     opening_balance: "رصيد افتتاحي",
     deposit: "إيداع",
     withdrawal: "سحب",
@@ -143,6 +146,31 @@ const TreasuryDetail = () => {
         .order("date", { ascending: false });
       if (error) throw error;
       return data;
+    },
+    enabled: !!id,
+  });
+  // Fetch purchase payments for resolving details in transactions table
+  const { data: purchasePayments } = useQuery({
+    queryKey: ["treasury_purchase_payments", id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("purchase_payments")
+        .select(`
+          id,
+          purchase_id,
+          purchases (
+            id,
+            title,
+            notes,
+            invoice_number,
+            projects (id, name, clients (id, name)),
+            suppliers (id, name),
+            project_phases:phase_id (id, name)
+          )
+        `)
+        .eq("treasury_id", id!);
+      if (error) throw error;
+      return data as any[];
     },
     enabled: !!id,
   });
@@ -263,13 +291,22 @@ const TreasuryDetail = () => {
   // Compute stats
   const stats = useMemo(() => {
     const deposits = transactions?.filter(t => t.type === "deposit").reduce((s, t) => s + Number(t.amount), 0) || 0;
-    const withdrawals = transactions?.filter(t => t.type !== "deposit").reduce((s, t) => s + Number(t.amount), 0) || 0;
+    const withdrawals = transactions?.filter(t => t.type === "withdrawal").reduce((s, t) => s + Number(t.amount), 0) || 0;
     const clientPayments = transactions?.filter(t => t.source === "client_payment").reduce((s, t) => s + Number(t.amount), 0) || 0;
-    // Use actual paid_amount from purchases for accuracy
-    const purchaseWithdrawals = purchases?.reduce((s, p: any) => s + Number(p.paid_amount || 0) + Number(p.commission || 0), 0) || 0;
-    const netProfit = clientPayments - purchaseWithdrawals;
-    return { deposits, withdrawals, purchaseTotal: purchaseWithdrawals, clientPayments, purchaseWithdrawals, netProfit };
-  }, [transactions, purchases]);
+    
+    // Purchases and payments to suppliers/labor
+    const purchaseWithdrawals = transactions?.filter(t => 
+      t.type === "withdrawal" && (t.source === "purchase" || t.source === "purchase_payments" || t.reference_type === "purchase_payment" || t.reference_type === "purchase")
+    ).reduce((s, t) => s + Number(t.amount), 0) || 0;
+
+    // Expenses general
+    const expenseWithdrawals = transactions?.filter(t => 
+      t.type === "withdrawal" && (t.source === "expenses" || t.reference_type === "expense")
+    ).reduce((s, t) => s + Number(t.amount), 0) || 0;
+
+    const netProfit = clientPayments - (purchaseWithdrawals + expenseWithdrawals);
+    return { deposits, withdrawals, purchaseTotal: purchaseWithdrawals + expenseWithdrawals, clientPayments, purchaseWithdrawals, expenseWithdrawals, netProfit };
+  }, [transactions]);
 
   if (loadingTreasury) {
     return (
@@ -390,7 +427,8 @@ const TreasuryDetail = () => {
                 </p>
                 <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
                   <p>تسديدات الزبائن: {formatCurrencyLYD(stats.clientPayments)}</p>
-                  <p>تكلفة المشتريات: {formatCurrencyLYD(stats.purchaseWithdrawals)}</p>
+                  <p>تكلفة المشتريات والعمالة: {formatCurrencyLYD(stats.purchaseWithdrawals)}</p>
+                  <p>المصروفات العامة: {formatCurrencyLYD((stats as any).expenseWithdrawals || 0)}</p>
                 </div>
               </div>
             </div>
@@ -434,9 +472,15 @@ const TreasuryDetail = () => {
                       {transactions.map((tx) => {
                         const isClientPayment = tx.source === "client_payment";
                         // Enrich with purchase details (phase, project, client)
-                        const linkedPurchase = tx.reference_type === "purchase" && tx.reference_id
-                          ? purchases?.find((p: any) => p.id === tx.reference_id)
-                          : null;
+                        let linkedPurchase: any = null;
+                        if (tx.reference_type === "purchase" && tx.reference_id) {
+                          linkedPurchase = purchases?.find((p: any) => p.id === tx.reference_id);
+                        } else if (tx.reference_type === "purchase_payment" && tx.reference_id && purchasePayments) {
+                          const paymentRecord = purchasePayments.find((pp: any) => pp.id === tx.reference_id);
+                          if (paymentRecord) {
+                            linkedPurchase = paymentRecord.purchases;
+                          }
+                        }
 
                         return (
                           <TableRow key={tx.id} className={isClientPayment ? "bg-primary/5" : ""}>
@@ -470,20 +514,30 @@ const TreasuryDetail = () => {
                               {tx.source_details && <span className="text-muted-foreground text-xs block">{tx.source_details}</span>}
                               {linkedPurchase && (
                                 <div className="mt-1 text-xs space-y-0.5">
-                                  {(linkedPurchase as any).projects?.name && (
-                                    <p className="text-muted-foreground">📁 {(linkedPurchase as any).projects.name}</p>
+                                  {linkedPurchase.projects?.name && (
+                                    <p className="text-muted-foreground">📁 {linkedPurchase.projects.name}</p>
                                   )}
-                                  {(linkedPurchase as any).projects?.clients?.name && (
-                                    <p className="text-muted-foreground">👤 {(linkedPurchase as any).projects.clients.name}</p>
+                                  {linkedPurchase.projects?.clients?.name && (
+                                    <p className="text-muted-foreground">👤 {linkedPurchase.projects.clients.name}</p>
                                   )}
-                                  {(linkedPurchase as any).project_phases?.name && (
-                                    <p className="text-muted-foreground">📋 {(linkedPurchase as any).project_phases.name}</p>
+                                  {linkedPurchase.project_phases?.name && (
+                                    <p className="text-muted-foreground">📋 {linkedPurchase.project_phases.name}</p>
+                                  )}
+                                  {linkedPurchase.suppliers?.name && (
+                                    <p className="text-muted-foreground font-semibold">🤝 المورد: {linkedPurchase.suppliers.name}</p>
                                   )}
                                 </div>
                               )}
                             </TableCell>
                             <TableCell>
-                              {tx.description || "-"}
+                              {(() => {
+                                if (linkedPurchase && (tx.source === 'purchase_payments' || tx.reference_type === 'purchase_payment')) {
+                                  const titleText = linkedPurchase.title || linkedPurchase.notes || "مشتريات خدمات ومواد";
+                                  const numText = linkedPurchase.invoice_number ? `رقم ${linkedPurchase.invoice_number}` : 'بدون رقم';
+                                  return `سداد دفعة مشتريات: ${titleText} (${numText})`;
+                                }
+                                return tx.description || "-";
+                              })()}
                               {isClientPayment && (
                                 <div className="mt-1 p-2 rounded bg-primary/5 border border-primary/10 text-xs">
                                   <p className="text-muted-foreground">تسديد من الزبون</p>

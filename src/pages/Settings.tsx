@@ -33,7 +33,11 @@ import {
   Trash2,
   ShieldAlert,
   Database,
-  Cloud
+  Cloud,
+  Wallet,
+  Landmark,
+  Coins,
+  TrendingUp
 } from "lucide-react";
 
 const Settings = () => {
@@ -59,6 +63,9 @@ const Settings = () => {
   
   const [themeColor, setThemeColor] = useState("#d6ac40");
   const [defaultTheme, setDefaultTheme] = useState("light");
+  
+  const [contractingTreasuryId, setContractingTreasuryId] = useState("");
+  const [finishingTreasuryId, setFinishingTreasuryId] = useState("");
 
   // Show/Hide API Key States
   const [showImgbbKey, setShowImgbbKey] = useState(false);
@@ -76,6 +83,21 @@ const Settings = () => {
         .limit(1)
         .single();
       
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Fetch parent treasuries for selection
+  const { data: treasuries } = useQuery({
+    queryKey: ["parent-treasuries-list"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("treasuries")
+        .select("id, name, treasury_type, is_active")
+        .is("parent_id", null)
+        .eq("is_active", true)
+        .order("name");
       if (error) throw error;
       return data;
     },
@@ -100,6 +122,8 @@ const Settings = () => {
       setThemeColor(sData.theme_color || "#d6ac40");
       setDefaultTheme(sData.default_theme || "light");
       setGoogleDriveScriptUrl(sData.google_drive_script_url || "");
+      setContractingTreasuryId(sData.contracting_treasury_id || "");
+      setFinishingTreasuryId(sData.finishing_treasury_id || "");
     }
   }, [settings]);
 
@@ -144,6 +168,8 @@ const Settings = () => {
           theme_color: themeColor || null,
           default_theme: defaultTheme || "light",
           google_drive_script_url: googleDriveScriptUrl || null,
+          contracting_treasury_id: contractingTreasuryId || null,
+          finishing_treasury_id: finishingTreasuryId || null,
         } as any)
         .eq("id", settings.id);
 
@@ -269,6 +295,10 @@ const Settings = () => {
           <TabsTrigger value="theme" className="gap-2 cursor-pointer transition-all">
             <Palette className="h-4 w-4" />
             مظهر وألوان النظام
+          </TabsTrigger>
+          <TabsTrigger value="financial-sync" className="gap-2 cursor-pointer transition-all">
+            <Wallet className="h-4 w-4" />
+            الربط المالي والخزائن
           </TabsTrigger>
           <TabsTrigger value="admin-tools" className="gap-2 cursor-pointer transition-all">
             <Sliders className="h-4 w-4" />
@@ -868,6 +898,122 @@ const Settings = () => {
                   >
                     {updateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                     حفظ التغييرات
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Tab 4: Financial Sync Settings */}
+        <TabsContent value="financial-sync" className="mt-6">
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg font-bold text-foreground">
+                <Coins className="h-5 w-5 text-primary" />
+                إعدادات الربط المالي وتوزيع الخزائن
+              </CardTitle>
+              <CardDescription>
+                تخصيص وتثبيت الخزائن الافتراضية العامة المربوطة بمشاريع المقاولات ومشاريع التشطيبات.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6 pt-2 pb-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                {/* Contracting Default Treasury */}
+                <div className="space-y-3 p-4 rounded-xl border border-border bg-muted/20">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                      <TrendingUp className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm">مشاريع المقاولات</h4>
+                      <p className="text-xs text-muted-foreground">الخزينة الافتراضية المرتبطة بفواتير وبنود المقاولات</p>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-1.5 pt-2">
+                    <Label htmlFor="contracting_treasury">اختر الخزينة الرئيسية</Label>
+                    <Select
+                      value={contractingTreasuryId || "__none__"}
+                      onValueChange={(val) => setContractingTreasuryId(val === "__none__" ? "" : val)}
+                    >
+                      <SelectTrigger dir="rtl" className="bg-background">
+                        <SelectValue placeholder="اختر الخزينة للمقاولات" />
+                      </SelectTrigger>
+                      <SelectContent dir="rtl">
+                        <SelectItem value="__none__">بدون خزينة افتراضية</SelectItem>
+                        {treasuries?.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            <span className="flex items-center gap-2">
+                              {t.treasury_type === "bank" ? <Landmark className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
+                              {t.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Finishing Default Treasury */}
+                <div className="space-y-3 p-4 rounded-xl border border-border bg-muted/20">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                      <Palette className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm">مشاريع التشطيبات</h4>
+                      <p className="text-xs text-muted-foreground">الخزينة الافتراضية المرتبطة بفواتير التشطيبات بالنسبة المئوية</p>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-1.5 pt-2">
+                    <Label htmlFor="finishing_treasury">اختر الخزينة الرئيسية</Label>
+                    <Select
+                      value={finishingTreasuryId || "__none__"}
+                      onValueChange={(val) => setFinishingTreasuryId(val === "__none__" ? "" : val)}
+                    >
+                      <SelectTrigger dir="rtl" className="bg-background">
+                        <SelectValue placeholder="اختر الخزينة للتشطيبات" />
+                      </SelectTrigger>
+                      <SelectContent dir="rtl">
+                        <SelectItem value="__none__">بدون خزينة افتراضية</SelectItem>
+                        {treasuries?.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            <span className="flex items-center gap-2">
+                              {t.treasury_type === "bank" ? <Landmark className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
+                              {t.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+              </div>
+
+              <div className="flex items-center gap-2 p-3 rounded-lg border border-yellow-500/20 bg-yellow-500/5 text-yellow-600 dark:text-yellow-500">
+                <ShieldAlert className="h-4 w-4 shrink-0" />
+                <p className="text-xs">
+                  ملاحظة: هذا الخيار يُثبّت خزينة افتراضية عامة على مستوى النظام بالكامل. سيتم تلقائياً ربط أي فواتير مراحل جديدة بالخزينة المختارة هنا بناءً على نوع المشروع، مع إمكانية تعديلها يدوياً للمرحلة لاحقاً إذا لزم الأمر.
+                </p>
+              </div>
+
+              {isAdmin && (
+                <div className="flex justify-end pt-4 border-t border-border">
+                  <Button 
+                    onClick={handleSave} 
+                    disabled={updateMutation.isPending}
+                    className="gap-2"
+                  >
+                    {updateMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    حفظ إعدادات الربط المالي
                   </Button>
                 </div>
               )}

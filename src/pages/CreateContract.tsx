@@ -100,7 +100,7 @@ export default function CreateContract() {
   }
 
   function updateItem(itemId: string, patch: Partial<Item>) {
-    setItems((s) => s.map((it) => (it.id === itemId ? { ...it, ...patch } : it)));
+    setItems((s) => s.map((it) => (it.id === itemId ? { ...it, ...patch, qty: 1 } : it)));
   }
 
   function removeItem(itemId: string) {
@@ -283,10 +283,7 @@ export default function CreateContract() {
             <TableHeader>
               <TableRow>
                 <TableHead>الصنف</TableHead>
-                <TableHead>الوحدة</TableHead>
-                <TableHead>الكمية</TableHead>
-                <TableHead>السعر</TableHead>
-                <TableHead>الإجمالي</TableHead>
+                <TableHead>سعر الفئة / الوحدة</TableHead>
                 <TableHead>ملاحظات</TableHead>
                 <TableHead>إجراءات</TableHead>
               </TableRow>
@@ -298,15 +295,8 @@ export default function CreateContract() {
                     <Input value={it.name} onChange={(e) => updateItem(it.id, { name: e.target.value })} placeholder="اسم الصنف" />
                   </TableCell>
                   <TableCell>
-                    <Input value={it.unit} onChange={(e) => updateItem(it.id, { unit: e.target.value })} placeholder="الوحدة" />
-                  </TableCell>
-                  <TableCell>
-                    <Input type="number" value={it.qty} onChange={(e) => updateItem(it.id, { qty: Number(e.target.value) })} />
-                  </TableCell>
-                  <TableCell>
                     <Input type="number" value={it.price} onChange={(e) => updateItem(it.id, { price: Number(e.target.value) })} />
                   </TableCell>
-                  <TableCell className="font-semibold">{formatCurrencyLYD((it.qty || 0) * (it.price || 0))}</TableCell>
                   <TableCell>
                     <Input value={it.notes || ""} onChange={(e) => updateItem(it.id, { notes: e.target.value })} placeholder="ملاحظات" />
                   </TableCell>
@@ -317,13 +307,6 @@ export default function CreateContract() {
               ))}
             </TableBody>
           </Table>
-        )}
-
-        {items.length > 0 && (
-          <div className="flex items-center justify-end gap-4 mt-4 pt-4 border-t">
-            <span className="text-muted-foreground">إجمالي الأصناف:</span>
-            <span className="text-primary font-bold text-lg">{formatCurrencyLYD(itemsTotal)}</span>
-          </div>
         )}
       </Card>
 
@@ -370,8 +353,8 @@ export default function CreateContract() {
                 <div className="space-y-1">
                   {items.map((it) => (
                     <div key={it.id} className="flex justify-between text-sm">
-                      <span>{it.name} ({it.qty} {it.unit})</span>
-                      <span>{formatCurrencyLYD(it.qty * it.price)}</span>
+                      <span>{it.name}</span>
+                      <span>{formatCurrencyLYD(it.price)}</span>
                     </div>
                   ))}
                 </div>

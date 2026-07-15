@@ -27,9 +27,11 @@ import { Badge } from "@/components/ui/badge";
 import {
   Plus, Pencil, Trash2, Ruler, Square, Box, Package,
   Calculator, Settings, Search, X, ChevronDown, ChevronUp,
-  Layers, Tag, Hash,
+  Layers, Tag, Hash, FileText
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import ContractClauseTemplates from "./ContractClauseTemplates";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 /* ─── Types ──────────────────────────────────────────────────── */
 type MeasurementType = "linear" | "square" | "cubic";
@@ -332,33 +334,48 @@ const GeneralItems = () => {
   /* ── Render ────────────────────────────────────────────────── */
   return (
     <div className="space-y-6" dir="rtl">
-
       {/* ── Header ───────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className="flex items-start justify-between gap-4 flex-wrap pb-3 border-b border-border/40">
         <div className="flex items-center gap-3">
           <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
             <Package className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-foreground">البنود العامة</h1>
+            <h1 className="text-2xl font-bold text-foreground">إعدادات وقوالب العقود</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              البنود المتكررة التي يمكن استخدامها في المشاريع
+              إدارة بنود الأعمال المسعرة وقوالب الشروط والأحكام التلقائية للعقود
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Link to="/measurement-types">
-            <Button variant="outline" className="gap-2 cursor-pointer">
-              <Settings className="h-4 w-4" />
-              أنواع القياس
-            </Button>
-          </Link>
-          <Button onClick={openNew} className="gap-2 cursor-pointer">
-            <Plus className="h-4 w-4" />
-            إضافة بند
-          </Button>
-        </div>
       </div>
+
+      <Tabs defaultValue="work-items" className="space-y-6" dir="rtl">
+        <TabsList className="grid grid-cols-2 w-full max-w-md mx-auto bg-muted/60 p-1 rounded-xl border border-border/40 shadow-inner">
+          <TabsTrigger value="work-items" className="font-bold text-sm">
+            بنود الأعمال والأسعار (التسعير)
+          </TabsTrigger>
+          <TabsTrigger value="contract-clauses" className="font-bold text-sm">
+            شروط وأحكام العقود (القوالب)
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="work-items" className="space-y-6 outline-none">
+          {/* Work items toolbar with buttons */}
+          <div className="flex justify-between items-center gap-4 flex-wrap bg-card border border-border/60 p-4 rounded-2xl shadow-sm">
+            <span className="text-sm font-semibold text-muted-foreground">قائمة البنود والأسعار الافتراضية</span>
+            <div className="flex items-center gap-2">
+              <Link to="/measurement-types">
+                <Button variant="outline" size="sm" className="gap-1.5 cursor-pointer">
+                  <Settings className="h-3.5 w-3.5" />
+                  أنواع القياس
+                </Button>
+              </Link>
+              <Button onClick={openNew} size="sm" className="gap-1.5 cursor-pointer">
+                <Plus className="h-3.5 w-3.5" />
+                إضافة بند عام
+              </Button>
+            </div>
+          </div>
 
       {/* ── Stats ────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -670,7 +687,7 @@ const GeneralItems = () => {
                     <div key={comp.symbol} className="space-y-1">
                       <Label className="text-xs flex items-center gap-1.5">
                         {comp.label}
-                        <Badge variant="outline" className="text-[10px] font-mono px-1.5">{comp.symbol}</Badge>
+                        <Badge variant="outline" className="text-[10px] px-1.5">{comp.symbol}</Badge>
                       </Label>
                       <Input
                         type="number"
@@ -715,7 +732,7 @@ const GeneralItems = () => {
                     {calculatedQuantity !== null && (
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground">الكمية المحسوبة:</span>
-                        <span className="font-bold text-primary font-mono">
+                        <span className="font-bold text-primary">
                           {calculatedQuantity.toFixed(4).replace(/\.?0+$/, "")} {selectedMeasurementConfig.unit_symbol}
                         </span>
                       </div>
@@ -764,7 +781,7 @@ const GeneralItems = () => {
                     ? `مثال: ${selectedMeasurementConfig.components.map((c) => c.symbol).join(" * ")} * السعر`
                     : "مثال: السعر * الطول * العرض"
                 }
-                className="font-mono text-sm"
+                className="text-sm"
                 dir="ltr"
               />
               <p className="text-xs text-muted-foreground">
@@ -772,7 +789,7 @@ const GeneralItems = () => {
                   <>
                     الرموز المتاحة:{" "}
                     {selectedMeasurementConfig.components.map((c) => (
-                      <Badge key={c.symbol} variant="outline" className="mx-0.5 font-mono text-[10px]">{c.symbol}</Badge>
+                      <Badge key={c.symbol} variant="outline" className="mx-0.5 text-[10px]">{c.symbol}</Badge>
                     ))}
                     <span className="mx-1">+ السعر</span>
                   </>
@@ -790,14 +807,14 @@ const GeneralItems = () => {
                   <div className="flex flex-wrap gap-1.5">
                     {Object.entries(formulaExample.vals).map(([key, val]) => (
                       <span key={key} className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Badge variant="outline" className="font-mono text-[10px]">{key}</Badge>
+                        <Badge variant="outline" className="text-[10px]">{key}</Badge>
                         = {val}
                       </span>
                     ))}
                   </div>
                   <div className="flex items-center justify-between pt-1 border-t border-primary/15">
                     <span className="text-sm text-muted-foreground">النتيجة:</span>
-                    <span className="font-bold font-mono text-primary">
+                    <span className="font-bold text-primary">
                       {formulaExample.result.toLocaleString()} د.ل
                     </span>
                   </div>
@@ -885,8 +902,16 @@ const GeneralItems = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+        </TabsContent>
+
+        <TabsContent value="contract-clauses" className="outline-none">
+          <div className="bg-card border border-border/60 rounded-2xl p-6 shadow-sm">
+            <ContractClauseTemplates hideHeader />
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
-};
+}
 
 export default GeneralItems;

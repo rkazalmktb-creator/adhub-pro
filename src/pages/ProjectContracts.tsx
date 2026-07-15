@@ -93,7 +93,7 @@ export default function ProjectContracts() {
   const [notes, setNotes] = useState("");
   const [phaseId, setPhaseId] = useState<string>("");
   const [contractItems, setContractItems] = useState<
-    { id: string; name: string; quantity: number; unit_price: number; project_item_id: string }[]
+    { id: string; name: string; quantity: number; unit_price: number; project_item_id: string; general_item_id: string }[]
   >([]);
 
   const { data: project } = useQuery({
@@ -175,6 +175,18 @@ export default function ProjectContracts() {
       return data;
     },
     enabled: !!projectId,
+  });
+
+  const { data: generalItems = [] } = useQuery({
+    queryKey: ["general-project-items"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("general_project_items")
+        .select("id, name, default_unit_price")
+        .order("name");
+      if (error) throw error;
+      return data;
+    },
   });
 
   // Fetch contract items for expanded contract
@@ -311,6 +323,7 @@ export default function ProjectContracts() {
         quantity: Number(item.quantity),
         unit_price: Number(item.unit_price),
         project_item_id: item.project_item_id || "",
+        general_item_id: "",
       }))
     );
     setFormOpen(true);
@@ -319,7 +332,7 @@ export default function ProjectContracts() {
   const addContractItem = () => {
     setContractItems((prev) => [
       ...prev,
-      { id: `new-${Date.now()}`, name: "", quantity: 0, unit_price: 0, project_item_id: "" },
+      { id: `new-${Date.now()}`, name: "", quantity: 1, unit_price: 0, project_item_id: "", general_item_id: "" },
     ]);
   };
 
@@ -328,6 +341,15 @@ export default function ProjectContracts() {
       prev.map((item, i) => {
         if (i !== idx) return item;
         const updated = { ...item, ...patch };
+        // If linking to general item, auto-fill
+        if (patch.general_item_id && patch.general_item_id !== "") {
+          const gItem = generalItems.find((g) => g.id === patch.general_item_id);
+          if (gItem) {
+            updated.name = gItem.name;
+            updated.unit_price = Number(gItem.default_unit_price || 0);
+            if (updated.quantity <= 0) updated.quantity = 1;
+          }
+        }
         // If linking to project item, auto-fill
         if (patch.project_item_id && patch.project_item_id !== "") {
           const pItem = projectItems.find((p) => p.id === patch.project_item_id);
@@ -356,7 +378,7 @@ export default function ProjectContracts() {
         description: description || null,
         start_date: startDate,
         end_date: endDate || null,
-        amount: amount || itemsTotal,
+        amount: amount,
         status,
         payment_terms: paymentTerms || null,
         notes: notes || null,
@@ -394,9 +416,9 @@ export default function ProjectContracts() {
             contract_id: contractId!,
             project_item_id: item.project_item_id || null,
             name: item.name,
-            quantity: item.quantity,
+            quantity: 1,
             unit_price: item.unit_price,
-            total_price: item.quantity * item.unit_price,
+            total_price: item.unit_price,
             order_index: idx,
           }));
           const { error } = await supabase.from("contract_items").insert(itemsToInsert);
@@ -568,21 +590,15 @@ export default function ProjectContracts() {
                             <TableHeader>
                               <TableRow>
                                 <TableHead className="text-xs">البند</TableHead>
-                                <TableHead className="text-xs">الكمية</TableHead>
-                                <TableHead className="text-xs">سعر الوحدة</TableHead>
-                                <TableHead className="text-xs">الإجمالي</TableHead>
+                                <TableHead className="text-xs text-left">سعر الفئة / الوحدة</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
                               {loadedContractItems.map((item) => (
                                 <TableRow key={item.id}>
                                   <TableCell className="text-sm font-medium">{item.name}</TableCell>
-                                  <TableCell className="text-sm">{item.quantity}</TableCell>
-                                  <TableCell className="text-sm">
+                                  <TableCell className="text-sm text-left font-semibold">
                                     {formatCurrencyLYD(Number(item.unit_price))}
-                                  </TableCell>
-                                  <TableCell className="text-sm font-semibold">
-                                    {formatCurrencyLYD(Number(item.total_price))}
                                   </TableCell>
                                 </TableRow>
                               ))}
@@ -798,21 +814,44 @@ export default function ProjectContracts() {
                   {contractItems.map((item, idx) => (
                     <Card key={item.id} className="p-3">
                       <div className="grid gap-2 md:grid-cols-5 items-end">
-                        {projectItems.length > 0 && (
-                          <div className="md:col-span-5 space-y-1">
-                            <Label className="text-xs text-muted-foreground">
+                        <div className="md:col-span-5 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <Label className="text-[11px] text-muted-foreground">
+                              اختيار من البنود العامة (تلقائي السعر)
+                            </Label>
+                            <Select
+                              value={item.general_item_id || "__none__"}
+                              onValueChange={(val) => updateContractItem(idx, { general_item_id: val === "__none__" ? "" : val, project_item_id: "" })}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="اختر البند العام" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">بدون ربط ببند عام</SelectItem>
+                                {generalItems.map((gi: any) => (
+                                  <SelectItem key={gi.id} value={gi.id}>
+                                    {gi.name} ({gi.default_unit_price} د.ل)
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-1">
+                            <Label className="text-[11px] text-muted-foreground">
                               ربط ببند المشروع (اختياري)
                             </Label>
                             <Select
                               value={item.project_item_id || "__none__"}
-                              onValueChange={(val) => updateContractItem(idx, { project_item_id: val === "__none__" ? "" : val })}
+                              onValueChange={(val) => updateContractItem(idx, { project_item_id: val === "__none__" ? "" : val, general_item_id: "" })}
+                              disabled={projectItems.length === 0}
                             >
                               <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="اختر بند المشروع" />
+                                <SelectValue placeholder={projectItems.length === 0 ? "لا توجد بنود للمشروع" : "اختر بند المشروع"} />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="__none__">بدون ربط</SelectItem>
-                                {projectItems.map((pi) => (
+                                <SelectItem value="__none__">بدون ربط ببند المشروع</SelectItem>
+                                {projectItems.map((pi: any) => (
                                   <SelectItem key={pi.id} value={pi.id}>
                                     {pi.name}
                                   </SelectItem>
@@ -820,9 +859,9 @@ export default function ProjectContracts() {
                               </SelectContent>
                             </Select>
                           </div>
-                        )}
+                        </div>
 
-                        <div className="md:col-span-2 space-y-1">
+                        <div className="md:col-span-3 space-y-1">
                           <Label className="text-xs">اسم البند</Label>
                           <Input
                             value={item.name}
@@ -832,20 +871,8 @@ export default function ProjectContracts() {
                           />
                         </div>
 
-                        <div className="space-y-1">
-                          <Label className="text-xs">الكمية</Label>
-                          <Input
-                            type="number"
-                            value={item.quantity}
-                            onChange={(e) =>
-                              updateContractItem(idx, { quantity: Number(e.target.value) })
-                            }
-                            className="h-8 text-sm"
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <Label className="text-xs">سعر الوحدة</Label>
+                        <div className="md:col-span-1 space-y-1">
+                          <Label className="text-xs">سعر الفئة / الوحدة</Label>
                           <Input
                             type="number"
                             value={item.unit_price}
@@ -856,13 +883,7 @@ export default function ProjectContracts() {
                           />
                         </div>
 
-                        <div className="flex items-end gap-2">
-                          <div className="flex-1">
-                            <Label className="text-xs">الإجمالي</Label>
-                            <p className="h-8 flex items-center text-sm font-bold text-primary">
-                              {formatCurrencyLYD(item.quantity * item.unit_price)}
-                            </p>
-                          </div>
+                        <div className="md:col-span-1 flex items-end justify-end">
                           <Button
                             variant="ghost"
                             size="icon"
@@ -875,11 +896,6 @@ export default function ProjectContracts() {
                       </div>
                     </Card>
                   ))}
-
-                  <div className="flex justify-end items-center gap-2 pt-2 border-t">
-                    <span className="text-sm text-muted-foreground">إجمالي البنود:</span>
-                    <span className="font-bold text-primary">{formatCurrencyLYD(itemsTotal)}</span>
-                  </div>
                 </div>
               )}
             </div>

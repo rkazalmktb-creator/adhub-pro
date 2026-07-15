@@ -27,6 +27,7 @@ interface ProjectCardProps {
   custodyTotal?: number;
   contractsCount?: number;
   contractsValue?: number;
+  projectType?: "contracting" | "finishing";
 }
 
 const statusLabels = {
@@ -59,6 +60,7 @@ export const ProjectCard = ({
   custodyTotal = 0,
   contractsCount = 0,
   contractsValue = 0,
+  projectType = "contracting",
 }: ProjectCardProps) => {
   const location = useLocation();
   const { isEngineer } = useAuth();
@@ -195,48 +197,75 @@ export const ProjectCard = ({
 
         {/* Action Buttons */}
         <div className="pt-2 border-t border-border space-y-2">
-          <div className="grid grid-cols-3 gap-2">
-            <Link to={`/projects/${id}/phases`}>
-              <Button variant="outline" size="sm" className="w-full gap-1.5 h-9">
-                <Box className="h-4 w-4" />
-                <span className="truncate">المراحل</span>
-              </Button>
-            </Link>
-            <Link to={`/projects/${id}/progress`}>
-              <Button variant="outline" size="sm" className="w-full gap-1.5 h-9">
-                <TrendingUp className="h-4 w-4" />
-                <span className="truncate">التقدم</span>
-              </Button>
-            </Link>
-            <Link to={`/projects/${id}/contracts`}>
-              <Button variant="outline" size="sm" className="w-full gap-1.5 h-9">
-                <FileText className="h-4 w-4" />
-                <span className="truncate">العقود</span>
-              </Button>
-            </Link>
-          </div>
-          
-          {!shouldHideFinancials && (
+          {projectType === "finishing" ? (
+            // Layout for finishing projects (No phases, items, progress, equipment, or contracts)
             <div className="grid grid-cols-3 gap-2">
-              <Link to={`/projects/${id}/purchases`}>
-                <Button variant="outline" size="sm" className="w-full gap-1 h-9 text-xs px-2">
-                  <ShoppingCart className="h-3.5 w-3.5 shrink-0" />
+              <Link to={`/projects/${id}/purchases`} className="w-full">
+                <Button variant="outline" size="sm" className="w-full gap-1 h-9 text-xs px-1 border-primary/20 hover:border-primary/40">
+                  <ShoppingCart className="h-3.5 w-3.5 shrink-0 text-primary" />
                   <span className="truncate">المشتريات</span>
                 </Button>
               </Link>
-              <Link to={`/projects/${id}/equipment`}>
-                <Button variant="outline" size="sm" className="w-full gap-1 h-9 text-xs px-2">
-                  <Wrench className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">الإيجارات</span>
-                </Button>
-              </Link>
-              <Link to={`/projects/${id}/expenses`}>
-                <Button variant="outline" size="sm" className="w-full gap-1 h-9 text-xs px-2">
-                  <Coins className="h-3.5 w-3.5 shrink-0" />
+              <Link to={`/projects/${id}/expenses`} className="w-full">
+                <Button variant="outline" size="sm" className="w-full gap-1 h-9 text-xs px-1">
+                  <Coins className="h-3.5 w-3.5 shrink-0 text-orange-500" />
                   <span className="truncate">المصروفات</span>
                 </Button>
               </Link>
+              <Link to={`/projects/${id}/report`} className="w-full">
+                <Button variant="outline" size="sm" className="w-full gap-1 h-9 text-xs px-1">
+                  <Printer className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+                  <span className="truncate">التقرير</span>
+                </Button>
+              </Link>
             </div>
+          ) : (
+            // Standard layout for contracting projects
+            <>
+              <div className="grid grid-cols-3 gap-2">
+                <Link to={`/projects/${id}/phases`}>
+                  <Button variant="outline" size="sm" className="w-full gap-1.5 h-9">
+                    <Box className="h-4 w-4" />
+                    <span className="truncate">المراحل</span>
+                  </Button>
+                </Link>
+                <Link to={`/projects/${id}/progress`}>
+                  <Button variant="outline" size="sm" className="w-full gap-1.5 h-9">
+                    <TrendingUp className="h-4 w-4" />
+                    <span className="truncate">التقدم</span>
+                  </Button>
+                </Link>
+                <Link to={`/projects/${id}/contracts`}>
+                  <Button variant="outline" size="sm" className="w-full gap-1.5 h-9">
+                    <FileText className="h-4 w-4" />
+                    <span className="truncate">العقود</span>
+                  </Button>
+                </Link>
+              </div>
+              
+              {!shouldHideFinancials && (
+                <div className="grid grid-cols-3 gap-2">
+                  <Link to={`/projects/${id}/purchases`}>
+                    <Button variant="outline" size="sm" className="w-full gap-1 h-9 text-xs px-2">
+                      <ShoppingCart className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">المشتريات</span>
+                    </Button>
+                  </Link>
+                  <Link to={`/projects/${id}/equipment`}>
+                    <Button variant="outline" size="sm" className="w-full gap-1 h-9 text-xs px-2">
+                      <Wrench className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">الإيجارات</span>
+                    </Button>
+                  </Link>
+                  <Link to={`/projects/${id}/expenses`}>
+                    <Button variant="outline" size="sm" className="w-full gap-1 h-9 text-xs px-2">
+                      <Coins className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">المصروفات</span>
+                    </Button>
+                  </Link>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

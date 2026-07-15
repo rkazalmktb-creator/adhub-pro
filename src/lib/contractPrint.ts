@@ -1,4 +1,4 @@
-import { generatePrintStyles, getPrintValues } from "./printStyles";
+import { generatePrintStyles, getPrintValues, openPrintWindow } from "./printStyles";
 import { formatCurrencyLYD } from "./currency";
 import { getElementLabels } from "./printLabels";
 
@@ -113,9 +113,7 @@ export function printContract(data: ContractPrintData) {
       <tr>
         <td class="cell-center">${idx + 1}</td>
         <td class="cell-name">${item.name}</td>
-        <td class="cell-center">${item.quantity}</td>
-        <td class="cell-center">${formatCurrencyLYD(Number(item.unit_price))}</td>
-        <td class="cell-center cell-bold">${formatCurrencyLYD(Number(item.total_price))}</td>
+        <td class="cell-center cell-bold">${formatCurrencyLYD(Number(item.unit_price))}</td>
       </tr>`
     )
     .join("");
@@ -141,8 +139,6 @@ export function printContract(data: ContractPrintData) {
   const baseStyles = generatePrintStyles(settings);
   const contractStyles = `
     :root {
-      --c-header-bg: ${cs.contract_header_bg_color};
-      --c-header-text: ${cs.contract_header_text_color};
       --c-accent: ${cs.contract_accent_color};
       --c-body-size: ${cs.contract_font_size_body}pt;
       --c-title-size: ${cs.contract_font_size_title}pt;
@@ -151,90 +147,50 @@ export function printContract(data: ContractPrintData) {
     .print-content {
       max-height: none !important;
       font-size: var(--c-body-size);
+      line-height: 1.8;
     }
 
-    /* ========== HEADER ========== */
-    .contract-header-bar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      background: var(--c-header-bg);
-      color: var(--c-header-text);
-      padding: 12px 18px;
-      border-radius: 6px;
-      margin-bottom: 14px;
-      gap: 12px;
-    }
-
-    .header-logo img {
-      max-height: 60px;
-      max-width: 120px;
-      object-fit: contain;
-    }
-
-    .logo-placeholder {
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      background: var(--c-accent);
-      color: var(--c-header-bg);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 22pt;
-      font-weight: bold;
-    }
-
-    .header-center-title {
-      flex: 1;
+    /* ========== TITLE BLOCK ========== */
+    .contract-title-block {
       text-align: center;
+      margin-bottom: 24px;
+      padding: 16px;
+      border-bottom: 2px dashed var(--c-accent);
     }
-
-    .company-title {
-      font-size: 12pt;
-      opacity: 0.85;
-      margin-bottom: 2px;
-      letter-spacing: 1px;
-    }
-
+    
     .contract-main-title {
       font-size: var(--c-title-size);
-      font-weight: bold;
-      letter-spacing: 3px;
+      font-weight: 800;
+      color: #8c6e26;
+      margin-bottom: 8px;
     }
-
-    .header-info {
-      text-align: ${logoOnRight ? "left" : "right"};
-      font-size: 9pt;
-      line-height: 1.8;
-      min-width: 140px;
+    
+    .contract-meta-row {
+      font-size: 10pt;
+      color: #4b5563;
+      display: flex;
+      justify-content: center;
+      gap: 16px;
     }
-
-    .header-info strong {
+    
+    .meta-divider {
       color: var(--c-accent);
-    }
-
-    /* ========== ACCENT DIVIDER ========== */
-    .accent-divider {
-      height: 3px;
-      background: linear-gradient(to ${logoOnRight ? "left" : "right"}, var(--c-accent), var(--c-header-bg), var(--c-accent));
-      border: none;
-      margin: 0 0 14px 0;
-      border-radius: 2px;
+      margin: 0 4px;
     }
 
     /* ========== PROJECT INFO GRID ========== */
     .project-info-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-bottom: 14px;
+      gap: 10px;
+      margin-bottom: 18px;
     }
 
     .info-card {
-      border: 1px solid ${v.tableBorderColor}60;
-      border-radius: 4px;
+      border: 1px solid var(--c-accent);
+      border-radius: 6px;
       overflow: hidden;
+      background: #ffffff;
     }
 
     .info-card.full-width {
@@ -242,57 +198,45 @@ export function printContract(data: ContractPrintData) {
     }
 
     .info-card-label {
-      background: var(--c-header-bg);
-      color: var(--c-header-text);
-      font-size: 8pt;
-      padding: 3px 8px;
+      background: #fdfaf2;
+      color: #8c6e26;
+      font-size: 8.5pt;
+      padding: 4px 8px;
       font-weight: bold;
+      border-bottom: 1px solid var(--c-accent);
     }
 
     .info-card-value {
-      padding: 5px 8px;
+      padding: 6px 10px;
       font-size: var(--c-body-size);
       color: ${v.tableTextColor};
     }
 
     .info-card-value.highlight {
       font-weight: bold;
-      color: var(--c-accent);
-      font-size: 12pt;
+      color: #8c6e26;
+      font-size: 11pt;
     }
 
     /* ========== SECTION ========== */
     .contract-section {
-      margin-bottom: 14px;
+      margin-bottom: 18px;
       page-break-inside: avoid;
     }
 
     .section-header {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
       padding-bottom: 4px;
-      border-bottom: 2px solid var(--c-accent);
-    }
-
-    .section-header-icon {
-      width: 24px;
-      height: 24px;
-      background: var(--c-header-bg);
-      color: var(--c-header-text);
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11pt;
-      font-weight: bold;
+      border-right: 4px solid var(--c-accent);
+      padding-right: 8px;
     }
 
     .section-header-text {
-      font-size: 13pt;
+      font-size: 12pt;
       font-weight: bold;
-      color: var(--c-header-bg);
+      color: #8c6e26;
     }
 
     /* ========== ITEMS TABLE ========== */
@@ -301,46 +245,39 @@ export function printContract(data: ContractPrintData) {
       border-collapse: separate;
       border-spacing: 0;
       font-size: var(--c-body-size);
-      border: 1px solid ${v.tableBorderColor};
-      border-radius: 4px;
+      border: 1px solid var(--c-accent);
+      border-radius: 6px;
       overflow: hidden;
+      margin-bottom: 12px;
     }
 
     .items-table th {
-      background: var(--c-header-bg);
-      color: var(--c-header-text);
-      padding: 7px 8px;
+      background: #fdfaf2;
+      color: #8c6e26;
+      padding: 8px 10px;
       text-align: center;
       font-size: 10pt;
       font-weight: bold;
-      border-bottom: 2px solid var(--c-accent);
+      border-bottom: 1.5px solid var(--c-accent);
     }
 
     .items-table td {
-      padding: 6px 8px;
+      padding: 8px 10px;
       border-bottom: 1px solid ${v.tableBorderColor}50;
       color: ${v.tableTextColor};
+    }
+
+    .items-table tbody tr:last-child td {
+      border-bottom: none;
     }
 
     .items-table tbody tr:nth-child(even) {
       background: ${v.tableRowEvenColor};
     }
 
-    .items-table tbody tr:hover {
-      background: var(--c-accent)10;
-    }
-
     .cell-center { text-align: center; }
     .cell-name { font-weight: 500; }
-    .cell-bold { font-weight: bold; color: var(--c-header-bg); }
-
-    .items-table tfoot td {
-      background: var(--c-header-bg);
-      color: var(--c-header-text);
-      font-weight: bold;
-      padding: 8px;
-      border: none;
-    }
+    .cell-bold { font-weight: bold; color: #8c6e26; }
 
     /* ========== TOTAL BOX ========== */
     .contract-total-box {
@@ -348,44 +285,45 @@ export function printContract(data: ContractPrintData) {
       align-items: center;
       justify-content: center;
       gap: 12px;
-      background: linear-gradient(135deg, var(--c-header-bg), var(--c-header-bg)dd);
-      color: var(--c-header-text);
-      padding: 10px 20px;
+      background: #fdfaf2;
+      border: 1px solid var(--c-accent);
+      color: #8c6e26;
+      padding: 8px 16px;
       border-radius: 6px;
       margin-top: 10px;
     }
 
     .contract-total-box .total-label {
-      font-size: 11pt;
-      opacity: 0.9;
+      font-size: 10pt;
+      font-weight: bold;
     }
 
     .contract-total-box .total-value {
-      font-size: 16pt;
-      font-weight: bold;
-      color: var(--c-accent);
+      font-size: 14pt;
+      font-weight: 800;
     }
 
     /* ========== CLAUSES ========== */
     .clause-item {
       display: flex;
-      gap: 10px;
-      margin-bottom: 10px;
+      gap: 12px;
+      margin-bottom: 12px;
       page-break-inside: avoid;
     }
 
     .clause-number {
-      min-width: 26px;
-      height: 26px;
-      background: var(--c-header-bg);
-      color: var(--c-header-text);
+      min-width: 22px;
+      height: 22px;
+      background: #fdfaf2;
+      color: #8c6e26;
+      border: 1px solid var(--c-accent);
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 10pt;
+      font-size: 9pt;
       font-weight: bold;
-      margin-top: 2px;
+      margin-top: 3px;
     }
 
     .clause-body {
@@ -395,28 +333,27 @@ export function printContract(data: ContractPrintData) {
     .clause-title {
       font-weight: bold;
       font-size: 11pt;
-      color: var(--c-header-bg);
+      color: #8c6e26;
       margin-bottom: 3px;
     }
 
     .clause-content {
       font-size: var(--c-body-size);
       color: ${v.tableTextColor};
-      line-height: 1.9;
+      line-height: 1.8;
       text-align: justify;
-      padding-right: 2px;
     }
 
     /* ========== DESCRIPTION ========== */
     .description-text {
       font-size: var(--c-body-size);
       color: ${v.tableTextColor};
-      line-height: 1.9;
+      line-height: 1.8;
       text-align: justify;
-      background: ${v.tableRowEvenColor};
+      background: #fdfaf2/10;
+      border: 1px solid var(--c-accent);
       padding: 10px 12px;
-      border-radius: 4px;
-      border-right: 3px solid var(--c-accent);
+      border-radius: 6px;
     }
 
     /* ========== SIGNATURES ========== */
@@ -428,35 +365,37 @@ export function printContract(data: ContractPrintData) {
     .signatures-grid {
       display: flex;
       justify-content: space-between;
-      gap: 30px;
+      gap: 24px;
       margin-top: 10px;
     }
 
     .signature-box {
       flex: 1;
       text-align: center;
-      border: 1px solid ${v.tableBorderColor}80;
+      border: 1px solid var(--c-accent);
       border-radius: 6px;
       overflow: hidden;
+      background: #ffffff;
     }
 
     .sig-header {
-      background: var(--c-header-bg);
-      color: var(--c-header-text);
+      background: #fdfaf2;
+      color: #8c6e26;
+      border-bottom: 1px solid var(--c-accent);
       padding: 6px 10px;
       font-weight: bold;
       font-size: 10pt;
     }
 
     .sig-body {
-      padding: 12px;
+      padding: 15px;
     }
 
     .sig-name {
       font-size: var(--c-body-size);
       color: ${v.tableTextColor};
       margin-bottom: 35px;
-      font-weight: 500;
+      font-weight: bold;
     }
 
     .sig-line {
@@ -481,7 +420,7 @@ export function printContract(data: ContractPrintData) {
     }
   `;
 
-  // Contract info grid
+  // Contract info grid (Without amount, and without end date since execution is usually open/without period)
   const projectInfoHtml = cs.contract_show_project_info ? `
     <div class="project-info-grid">
       <div class="info-card full-width">
@@ -501,14 +440,6 @@ export function printContract(data: ContractPrintData) {
         <div class="info-card-value">${contract.start_date}</div>
       </div>
       <div class="info-card">
-        <div class="info-card-label">${pl.label_end_date}</div>
-        <div class="info-card-value">${contract.end_date || "غير محدد"}</div>
-      </div>
-      <div class="info-card">
-        <div class="info-card-label">${pl.label_amount}</div>
-        <div class="info-card-value highlight">${formatCurrencyLYD(contractAmount)}</div>
-      </div>
-      <div class="info-card">
         <div class="info-card-label">${pl.label_payment_terms}</div>
         <div class="info-card-value">${contract.payment_terms || "غير محدد"}</div>
       </div>
@@ -518,74 +449,60 @@ export function printContract(data: ContractPrintData) {
   const descriptionHtml = cs.contract_show_description && contract.description ? `
     <div class="contract-section">
       <div class="section-header">
-        <div class="section-header-icon">📋</div>
         <div class="section-header-text">${pl.description_section}</div>
       </div>
       <div class="description-text">${contract.description}</div>
     </div>
   ` : "";
 
+  // Pricing Table: Agreed prices / rates (No totals mentioned)
   const itemsHtml = cs.contract_show_items_table && items.length > 0 ? `
     <div class="contract-section">
       <div class="section-header">
-        <div class="section-header-icon">📦</div>
-        <div class="section-header-text">${pl.items_section}</div>
+        <div class="section-header-text">جدول الأسعار المتفق عليه</div>
       </div>
       <table class="items-table">
         <thead>
           <tr>
-            <th style="width:7%">${pl.col_number}</th>
+            <th style="width:10%">${pl.col_number}</th>
             <th>${pl.col_item}</th>
-            <th style="width:12%">${pl.col_quantity}</th>
-            <th style="width:17%">${pl.col_unit_price}</th>
-            <th style="width:19%">${pl.col_total}</th>
+            <th style="width:30%">${pl.col_unit_price}</th>
           </tr>
         </thead>
         <tbody>
           ${itemsTableRows}
         </tbody>
-        <tfoot>
-          <tr>
-            <td colspan="4" style="text-align:center">${pl.total_label}</td>
-            <td style="text-align:center; font-size:12pt">${formatCurrencyLYD(itemsTotal)}</td>
-          </tr>
-        </tfoot>
       </table>
-      <div class="contract-total-box">
-        <span class="total-label">${pl.total_label}:</span>
-        <span class="total-value">${formatCurrencyLYD(contractAmount)}</span>
-      </div>
     </div>
   ` : "";
 
   const clausesSection = cs.contract_show_clauses && clauses.length > 0 ? `
     <div class="contract-section">
       <div class="section-header">
-        <div class="section-header-icon">⚖</div>
         <div class="section-header-text">${pl.clauses_section}</div>
       </div>
       ${clausesHtml}
     </div>
   ` : "";
 
+  // First party is ALWAYS the company, second party is ALWAYS the client
   const signaturesHtml = cs.contract_show_signatures ? `
     <div class="signatures-section">
       <div class="section-header">
-        <div class="section-header-icon">✍</div>
         <div class="section-header-text">${pl.signatures_section}</div>
       </div>
       <div class="signatures-grid">
         <div class="signature-box">
-          <div class="sig-header">${sigLabels[0] || "الطرف الأول"}</div>
+          <div class="sig-header">الطرف الأول (الشركة)</div>
           <div class="sig-body">
-            <div class="sig-name">${clientName || "_______________"}</div>
+            <div class="sig-name">${companyName || "_______________"}</div>
             <div class="sig-line">التوقيع والختم</div>
           </div>
         </div>
         <div class="signature-box">
-          <div class="sig-header">${sigLabels[1] || "الطرف الثاني"}</div>
+          <div class="sig-header">الطرف الثاني (العميل)</div>
           <div class="sig-body">
-            <div class="sig-name">${companyName || "_______________"}</div>
+            <div class="sig-name">${clientName || "_______________"}</div>
             <div class="sig-line">التوقيع والختم</div>
           </div>
         </div>
@@ -593,17 +510,19 @@ export function printContract(data: ContractPrintData) {
     </div>
   ` : "";
 
+  // Preamble (التمهيد) is placed first, then Clauses, then the Agreed Pricing/Rates Table, then Signatures
   const content = `
     <div class="print-area">
       <div class="print-content">
-        <div class="contract-header-bar">
-          ${headerContent}
+        <div class="print-report-title" style="display: none;">رقم العقد: ${contract.contract_number}</div>
+        <div class="print-report-subtitle" style="display: none;">تاريخ العقد: ${contract.start_date}</div>
+        <div class="contract-title-block">
+          <h1 class="contract-main-title">${contract.title}</h1>
         </div>
-        <hr class="accent-divider" />
         ${projectInfoHtml}
         ${descriptionHtml}
-        ${itemsHtml}
         ${clausesSection}
+        ${itemsHtml}
         ${signaturesHtml}
       </div>
 
@@ -617,28 +536,5 @@ export function printContract(data: ContractPrintData) {
     </div>
   `;
 
-  const printWindow = window.open("", "_blank", "width=900,height=700");
-  if (!printWindow) return;
-
-  printWindow.document.write(`
-    <!DOCTYPE html>
-    <html dir="rtl" lang="ar">
-    <head>
-      <meta charset="UTF-8">
-      <title>عقد - ${contract.title}</title>
-      <style>
-        ${baseStyles}
-        ${contractStyles}
-      </style>
-    </head>
-    <body>
-      <div class="print-btn-container">
-        <button class="print-btn" onclick="window.print()">🖨️ طباعة</button>
-        <button class="print-btn close-btn" onclick="window.close()">✕ إغلاق</button>
-      </div>
-      ${content}
-    </body>
-    </html>
-  `);
-  printWindow.document.close();
+  openPrintWindow(`رقم العقد: ${contract.contract_number}`, content, settings, contractStyles);
 }

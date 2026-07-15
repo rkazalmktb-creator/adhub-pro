@@ -51,7 +51,7 @@ type ClauseTemplate = {
 };
 
 /* ─── Component ──────────────────────────────────────────────── */
-export default function ContractClauseTemplates() {
+export default function ContractClauseTemplates({ hideHeader = false }: { hideHeader?: boolean }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -187,23 +187,36 @@ export default function ContractClauseTemplates() {
     <div className="space-y-6" dir="rtl">
 
       {/* ── Header ────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
-            <FileText className="h-5 w-5 text-primary" />
+      {!hideHeader ? (
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
+              <FileText className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">شروط وأحكام العقود الافتراضية</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                قوالب شروط وأحكام العقود المتكررة
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">البنود العامة</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              البنود المتكررة التي يمكن استخدامها في المشاريع
-            </p>
-          </div>
+          <Button className="gap-2 shrink-0 cursor-pointer" onClick={openNewForm}>
+            <Plus className="h-4 w-4" />
+            بند جديد
+          </Button>
         </div>
-        <Button className="gap-2 shrink-0 cursor-pointer" onClick={openNewForm}>
-          <Plus className="h-4 w-4" />
-          بند جديد
-        </Button>
-      </div>
+      ) : (
+        <div className="flex items-center justify-between pb-2 border-b border-border/40">
+          <div className="text-right">
+            <h3 className="text-base font-bold text-foreground">قوالب شروط وأحكام العقود</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">أضف وتحكّم في الشروط التلقائية التي تُحمّل في العقود</p>
+          </div>
+          <Button size="sm" className="gap-2 shrink-0 cursor-pointer" onClick={openNewForm}>
+            <Plus className="h-4 w-4" />
+            بند جديد
+          </Button>
+        </div>
+      )}
 
       {/* ── Stats row ─────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

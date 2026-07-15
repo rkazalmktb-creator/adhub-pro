@@ -154,12 +154,8 @@ const ProjectEquipmentRentals = () => {
   });
 
   useEffect(() => {
-    if (!phaseId && projectPhases) {
-      setForcedPhaseSelectorOpen(true);
-    } else {
-      setForcedPhaseSelectorOpen(false);
-    }
-  }, [phaseId, projectPhases]);
+    setForcedPhaseSelectorOpen(false);
+  }, []);
 
   const { data: companySettings } = useQuery({
     queryKey: ["company-settings"],

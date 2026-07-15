@@ -27,6 +27,13 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   ArrowRight,
   Plus,
   Wallet,
@@ -41,6 +48,8 @@ import {
   Wrench,
   Printer,
   Download,
+  Users,
+  Building2,
 } from "lucide-react";
 import { openPrintWindow, getPrintValues, generatePrintStyles } from "@/lib/printStyles";
 import { toast } from "@/hooks/use-toast";
@@ -69,7 +78,7 @@ const getTypeLabel = (type: string) => {
 };
 
 const ProjectPayments = () => {
-  const { id: projectId } = useParams<{ id: string }>();
+  const { id: urlProjectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -79,19 +88,54 @@ const ProjectPayments = () => {
   const [includeAllocationDetails, setIncludeAllocationDetails] = useState<boolean>(false);
   const [isPdfLoading, setIsPdfLoading] = useState<boolean>(false);
 
+  // General selectors state
+  const [selectedClientId, setSelectedClientId] = useState<string>("");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+
+  const activeProjectId = urlProjectId || selectedProjectId;
+
+  // Fetch all clients
+  const { data: allClients } = useQuery({
+    queryKey: ["clients-all"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("clients")
+        .select("id, name")
+        .order("name");
+      if (error) throw error;
+      return data;
+    },
+    enabled: !urlProjectId,
+  });
+
+  // Fetch client projects
+  const { data: clientProjects } = useQuery({
+    queryKey: ["client-projects-all", selectedClientId],
+    queryFn: async () => {
+      let query = supabase.from("projects").select("id, name, client_id");
+      if (selectedClientId && selectedClientId !== "__all__") {
+        query = query.eq("client_id", selectedClientId);
+      }
+      const { data, error } = await query.order("name");
+      if (error) throw error;
+      return data;
+    },
+    enabled: !urlProjectId,
+  });
+
   // Fetch project
   const { data: project } = useQuery({
-    queryKey: ["project", projectId],
+    queryKey: ["project", activeProjectId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("projects")
         .select("*, clients:client_id(id, name)")
-        .eq("id", projectId!)
+        .eq("id", activeProjectId!)
         .maybeSingle();
       if (error) throw error;
       return data;
     },
-    enabled: !!projectId,
+    enabled: !!activeProjectId,
   });
 
   // Fetch company settings for printing
@@ -124,37 +168,37 @@ const ProjectPayments = () => {
 
   // Fetch phases
   const { data: phases } = useQuery({
-    queryKey: ["project-phases", projectId],
+    queryKey: ["project-phases", activeProjectId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("project_phases")
         .select("id, name, phase_number, treasury_id, has_percentage, percentage_value")
-        .eq("project_id", projectId!)
+        .eq("project_id", activeProjectId!)
         .order("order_index");
       if (error) throw error;
       return data;
     },
-    enabled: !!projectId,
+    enabled: !!activeProjectId,
   });
 
   // Fetch existing payments
   const { data: payments, isLoading } = useQuery({
-    queryKey: ["client-payments", projectId],
+    queryKey: ["client-payments", activeProjectId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("client_payments")
         .select("*")
-        .eq("project_id", projectId!)
+        .eq("project_id", activeProjectId!)
         .order("date", { ascending: false });
       if (error) throw error;
       return data;
     },
-    enabled: !!projectId,
+    enabled: !!activeProjectId,
   });
 
   // Fetch payment allocations for all payments
   const { data: allAllocations } = useQuery({
-    queryKey: ["payment-allocations", projectId],
+    queryKey: ["payment-allocations", activeProjectId],
     queryFn: async () => {
       if (!payments?.length) return [];
       const paymentIds = payments.map(p => p.id);
@@ -186,7 +230,7 @@ const ProjectPayments = () => {
 
   // Fetch unpaid invoices
   const { data: unpaidInvoices } = useQuery({
-    queryKey: ["unpaid-invoices", projectId],
+    queryKey: ["unpaid-invoices", activeProjectId],
     queryFn: async () => {
       const invoices: UnpaidInvoice[] = [];
 
@@ -194,7 +238,7 @@ const ProjectPayments = () => {
       const { data: purchases } = await supabase
         .from("purchases")
         .select("id, total_amount, paid_amount, date, phase_id, invoice_number, supplier_id, rental_id, treasury_id, suppliers:supplier_id(name)")
-        .eq("project_id", projectId!)
+        .eq("project_id", activeProjectId!)
         .is("rental_id", null);
 
       const { data: existingAllocations } = await supabase
@@ -233,7 +277,7 @@ const ProjectPayments = () => {
       const { data: rentalPurchases } = await supabase
         .from("purchases")
         .select("id, total_amount, paid_amount, date, phase_id, rental_id, treasury_id, suppliers:supplier_id(name)")
-        .eq("project_id", projectId!)
+        .eq("project_id", activeProjectId!)
         .not("rental_id", "is", null);
 
       const rentalIds = rentalPurchases?.map(r => r.id) || [];
@@ -273,7 +317,7 @@ const ProjectPayments = () => {
       const { data: items } = await supabase
         .from("project_items")
         .select("id, name, total_price, phase_id")
-        .eq("project_id", projectId!);
+        .eq("project_id", activeProjectId!);
 
       const itemIds = items?.map(i => i.id) || [];
       if (itemIds.length > 0) {
@@ -296,7 +340,8 @@ const ProjectPayments = () => {
             id: item.id, type: "item",
             description: `بند: ${item.name}`,
             total_amount: Number(item.total_price), paid_amount: totalAllocated, remaining,
-            service_fee: 0, service_fee_percentage: 0,
+            service_fee: pct > 0 ? remaining * pct / 100 : 0,
+            service_fee_percentage: pct,
             phase_id: item.phase_id, phase_name: phase?.name || null,
             phase_treasury_id: phase?.treasury_id || null,
             source_treasury_id: phase?.treasury_id || null,
@@ -314,20 +359,25 @@ const ProjectPayments = () => {
 
       return invoices;
     },
-    enabled: !!projectId && !!phases,
+    enabled: !!activeProjectId && !!phases,
   });
 
   // Save payment mutation
   const saveMutation = useMutation({
-    mutationFn: async ({ formData, allocations }: { formData: { date: string; payment_method: string; notes: string }; allocations: AllocationInput[] }) => {
+    mutationFn: async ({ formData, allocations }: { formData: { date: string; payment_method: string; notes: string; treasury_id?: string; actualAmount?: number }; allocations: AllocationInput[] }) => {
       const selectedAllocations = allocations.filter(a => a.selected && a.amount > 0);
-      if (selectedAllocations.length === 0) throw new Error("يرجى اختيار فاتورة واحدة على الأقل");
-
+      
       const totalInvoiceAmount = selectedAllocations.reduce((sum, a) => sum + a.amount, 0);
       const totalFee = selectedAllocations.reduce((sum, a) => {
         return sum + (a.invoice.service_fee_percentage > 0 ? a.amount * a.invoice.service_fee_percentage / 100 : 0);
       }, 0);
       const totalAmount = totalInvoiceAmount + totalFee;
+
+      const finalAmount = formData.actualAmount || totalAmount;
+
+      if (selectedAllocations.length === 0 && finalAmount <= 0) {
+        throw new Error("يرجى اختيار فاتورة واحدة على الأقل أو إدخال قيمة سداد صالحة");
+      }
 
       // Group by source treasury
       const treasuryGroupsForSave: Record<string, { treasuryId: string; amount: number }> = {};
@@ -342,18 +392,32 @@ const ProjectPayments = () => {
         }
       }
 
-      const firstTreasuryId = Object.keys(treasuryGroupsForSave)[0] || null;
+      const firstTreasuryId = Object.keys(treasuryGroupsForSave)[0] || allTreasuries?.[0]?.id || null;
+      const targetTreasuryId = formData.treasury_id || firstTreasuryId;
+
+      if (!targetTreasuryId) {
+        throw new Error("لم يتم العثور على خزينة صالحة لإيداع الأموال. يرجى تهيئة خزائن النظام أولاً.");
+      }
+
+      // Calculate surplus and deposit it into the selected target treasury
+      const surplus = finalAmount - totalAmount;
+      if (surplus > 0) {
+        if (!treasuryGroupsForSave[targetTreasuryId]) {
+          treasuryGroupsForSave[targetTreasuryId] = { treasuryId: targetTreasuryId, amount: 0 };
+        }
+        treasuryGroupsForSave[targetTreasuryId].amount += surplus;
+      }
 
       // Insert payment
       const { data: payment, error: paymentError } = await supabase
         .from("client_payments")
         .insert({
-          project_id: projectId!,
+          project_id: activeProjectId!,
           client_id: project?.client_id || null,
-          amount: totalAmount,
+          amount: finalAmount,
           date: formData.date,
           payment_method: formData.payment_method,
-          treasury_id: firstTreasuryId!,
+          treasury_id: targetTreasuryId,
           notes: formData.notes || null,
         })
         .select()
@@ -362,32 +426,34 @@ const ProjectPayments = () => {
       if (paymentError) throw paymentError;
 
       // Insert allocations - include service fee in allocation amount
-      const allocationRows = selectedAllocations.map(a => {
-        const allocFee = a.invoice.service_fee_percentage > 0 ? a.amount * a.invoice.service_fee_percentage / 100 : 0;
-        return {
-          payment_id: payment.id,
-          reference_type: a.invoice.type,
-          reference_id: a.invoice.id,
-          phase_id: a.invoice.phase_id,
-          amount: a.amount + allocFee,
-        };
-      });
+      if (selectedAllocations.length > 0) {
+        const allocationRows = selectedAllocations.map(a => {
+          const allocFee = a.invoice.service_fee_percentage > 0 ? a.amount * a.invoice.service_fee_percentage / 100 : 0;
+          return {
+            payment_id: payment.id,
+            reference_type: a.invoice.type,
+            reference_id: a.invoice.id,
+            phase_id: a.invoice.phase_id,
+            amount: a.amount + allocFee,
+          };
+        });
 
-      const { error: allocError } = await supabase
-        .from("client_payment_allocations")
-        .insert(allocationRows);
+        const { error: allocError } = await supabase
+          .from("client_payment_allocations")
+          .insert(allocationRows);
 
-      if (allocError) throw allocError;
+        if (allocError) throw allocError;
 
-      // Update purchases paid_amount
-      for (const alloc of selectedAllocations) {
-        if (alloc.invoice.type === "purchase" || alloc.invoice.type === "rental") {
-          const newPaid = alloc.invoice.paid_amount + alloc.amount;
-          const newStatus = newPaid >= alloc.invoice.total_amount ? "paid" : "due";
-          await supabase
-            .from("purchases")
-            .update({ paid_amount: newPaid, status: newStatus })
-            .eq("id", alloc.invoice.id);
+        // Update purchases paid_amount
+        for (const alloc of selectedAllocations) {
+          if (alloc.invoice.type === "purchase" || alloc.invoice.type === "rental") {
+            const newPaid = alloc.invoice.paid_amount + alloc.amount;
+            const newStatus = newPaid >= alloc.invoice.total_amount ? "paid" : newPaid > 0 ? "partial" : "due";
+            await supabase
+              .from("purchases")
+              .update({ paid_amount: newPaid, status: newStatus })
+              .eq("id", alloc.invoice.id);
+          }
         }
       }
 
@@ -398,7 +464,7 @@ const ProjectPayments = () => {
           type: "deposit",
           amount: group.amount,
           balance_after: 0,
-          description: `تسديد من الزبون - ${project?.name || ""}${totalFee > 0 ? ` (شامل نسبة خدمات ${formatCurrencyLYD(totalFee)})` : ""}`,
+          description: `تسديد من الزبون - ${project?.name || ""}${totalFee > 0 ? ` (شامل نسبة خدمات ${formatCurrencyLYD(totalFee)})` : ""}${surplus > 0 ? ` (رصيد فائض مقبوض ${formatCurrencyLYD(surplus)})` : ""}`,
           date: formData.date,
           reference_type: "client_payment",
           reference_id: payment.id,
@@ -408,21 +474,21 @@ const ProjectPayments = () => {
 
       // Add to income table
       await supabase.from("income").insert({
-        project_id: projectId!,
+        project_id: activeProjectId!,
         client_id: project?.client_id || null,
-        amount: totalAmount,
+        amount: finalAmount,
         date: formData.date,
         type: "service",
         subtype: "client_payment",
         payment_method: formData.payment_method,
-        notes: `تسديد مجمع للمشروع: ${project?.name || ""} - ${selectedAllocations.length} فاتورة`,
+        notes: formData.notes || `تسديد دفعة للمشروع: ${project?.name || ""}${surplus > 0 ? ` (رصيد فائض ${formatCurrencyLYD(surplus)})` : ""}`,
         status: "received",
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client-payments", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["unpaid-invoices", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["payment-allocations", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["client-payments", activeProjectId] });
+      queryClient.invalidateQueries({ queryKey: ["unpaid-invoices", activeProjectId] });
+      queryClient.invalidateQueries({ queryKey: ["payment-allocations", activeProjectId] });
       queryClient.invalidateQueries({ queryKey: ["treasuries"] });
       toast({ title: "تم تسجيل التسديد بنجاح" });
       setDialogOpen(false);
@@ -438,6 +504,13 @@ const ProjectPayments = () => {
 
   const deleteMutation = useMutation({
     mutationFn: async (paymentId: string) => {
+      // 1. Fetch payment details first
+      const { data: payment } = await supabase
+        .from("client_payments")
+        .select("amount, date")
+        .eq("id", paymentId)
+        .maybeSingle();
+
       const { data: paymentAllocs } = await supabase
         .from("client_payment_allocations")
         .select("reference_id, reference_type, amount")
@@ -463,13 +536,24 @@ const ProjectPayments = () => {
         }
       }
 
+      // 2. Delete from income table
+      if (payment) {
+        await supabase
+          .from("income")
+          .delete()
+          .eq("project_id", activeProjectId!)
+          .eq("amount", payment.amount)
+          .eq("date", payment.date)
+          .eq("subtype", "client_payment");
+      }
+
       const { error } = await supabase.from("client_payments").delete().eq("id", paymentId);
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client-payments", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["unpaid-invoices", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["payment-allocations", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["client-payments", activeProjectId] });
+      queryClient.invalidateQueries({ queryKey: ["unpaid-invoices", activeProjectId] });
+      queryClient.invalidateQueries({ queryKey: ["payment-allocations", activeProjectId] });
       queryClient.invalidateQueries({ queryKey: ["treasuries"] });
       toast({ title: "تم حذف التسديد بنجاح" });
       setDeletePaymentId(null);
@@ -480,10 +564,6 @@ const ProjectPayments = () => {
   });
 
   const handleOpenDialog = () => {
-    if (!unpaidInvoices?.length) {
-      toast({ title: "لا توجد فواتير مستحقة", description: "جميع الفواتير مسددة بالكامل" });
-      return;
-    }
     setDialogOpen(true);
   };
 
@@ -762,7 +842,8 @@ const ProjectPayments = () => {
 
   return (
     <div className="space-y-6" dir="rtl">
-      <ProjectNavBar />
+      {/* ProjectNavBar only when accessed from a specific project URL */}
+      {urlProjectId && <ProjectNavBar />}
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -771,19 +852,93 @@ const ProjectPayments = () => {
             <CreditCard className="h-6 w-6 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold">تسديدات الزبون</h1>
+            <h1 className="text-2xl font-bold">إيصالات مقبوضات الزبائن</h1>
             <p className="text-sm text-muted-foreground">
-              {project?.name} - {(project?.clients as any)?.name || "بدون عميل"}
+              {project ? `${project.name} — ${(project.clients as any)?.name || "بدون عميل"}` : "اختر الزبون والمشروع لعرض التسديدات"}
             </p>
           </div>
         </div>
-        <Button onClick={handleOpenDialog}>
-          <Plus className="h-4 w-4 ml-2" />
-          تسديد جديد
-        </Button>
+        {activeProjectId && (
+          <Button onClick={handleOpenDialog} className="gap-2">
+            <Plus className="h-4 w-4" />
+            تسديد جديد
+          </Button>
+        )}
       </div>
 
-      {/* Summary Cards */}
+      {/* Client / Project Selector (general mode - no URL project) */}
+      {!urlProjectId && (
+        <Card className="border-2 border-primary/20 bg-gradient-to-br from-primary/5 to-background shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="p-1.5 bg-primary/10 rounded-lg">
+                <Users className="h-4 w-4 text-primary" />
+              </div>
+              <h3 className="font-bold text-sm text-primary">اختر الزبون والمشروع</h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold flex items-center gap-1">
+                  <Users className="h-3 w-3 text-primary" />
+                  الزبون / العميل
+                </Label>
+                <Select
+                  value={selectedClientId}
+                  onValueChange={(v) => {
+                    setSelectedClientId(v);
+                    setSelectedProjectId("");
+                  }}
+                  dir="rtl"
+                >
+                  <SelectTrigger className="h-10 rounded-xl border-primary/20 focus:border-primary">
+                    <SelectValue placeholder="اختر الزبون..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">جميع الزبائن</SelectItem>
+                    {allClients?.map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold flex items-center gap-1">
+                  <Building2 className="h-3 w-3 text-primary" />
+                  المشروع
+                </Label>
+                <Select
+                  value={selectedProjectId}
+                  onValueChange={setSelectedProjectId}
+                  dir="rtl"
+                  disabled={!clientProjects?.length}
+                >
+                  <SelectTrigger className="h-10 rounded-xl border-primary/20 focus:border-primary">
+                    <SelectValue placeholder={clientProjects?.length ? "اختر المشروع..." : "اختر الزبون أولاً..."} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {clientProjects?.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {selectedProjectId && project && (
+              <div className="mt-3 p-2.5 bg-primary/5 border border-primary/15 rounded-lg flex items-center justify-between">
+                <span className="text-xs text-primary font-semibold">
+                  ✓ تم تحديد: {project.name}
+                </span>
+                <Button size="sm" variant="ghost" className="h-6 text-xs text-muted-foreground px-2" onClick={() => setSelectedProjectId("")}>
+                  تغيير
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Summary Cards - only when project selected */}
+      {activeProjectId && (
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="bg-primary/5 border-primary/20">
           <CardContent className="p-4">
@@ -827,9 +982,16 @@ const ProjectPayments = () => {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* Payments List */}
-      {payments?.length === 0 ? (
+      {!activeProjectId ? (
+        <Card className="p-12 text-center border-dashed border-2 border-muted-foreground/20">
+          <Users className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
+          <h3 className="text-lg font-medium mb-2 text-muted-foreground">اختر زبوناً ومشروعاً</h3>
+          <p className="text-sm text-muted-foreground/70">حدد الزبون والمشروع من القائمة أعلاه لعرض التسديدات والفواتير المستحقة</p>
+        </Card>
+      ) : payments?.length === 0 ? (
         <Card className="p-12 text-center">
           <CreditCard className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
           <h3 className="text-lg font-medium mb-2">لا توجد تسديدات</h3>
@@ -845,6 +1007,8 @@ const ProjectPayments = () => {
             const paymentAllocs = allAllocations?.filter(a => a.payment_id === payment.id) || [];
             const isExpanded = expandedPayments.has(payment.id);
             const treasury = allTreasuries?.find(t => t.id === payment.treasury_id);
+            const totalAllocated = paymentAllocs.reduce((s, a) => s + Number(a.amount), 0);
+            const surplusAmount = Math.max(0, Number(payment.amount) - totalAllocated);
 
             return (
               <Collapsible key={payment.id} open={isExpanded} onOpenChange={() => togglePaymentExpand(payment.id)}>
@@ -854,7 +1018,14 @@ const ProjectPayments = () => {
                       <div className="flex items-center gap-3 flex-1 cursor-pointer">
                         {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
                         <div className="text-right">
-                          <p className="font-semibold">{formatCurrencyLYD(Number(payment.amount))}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold">{formatCurrencyLYD(Number(payment.amount))}</p>
+                            {surplusAmount > 0 && (
+                              <Badge variant="outline" className="text-yellow-600 border-yellow-500/30 bg-yellow-500/10 text-[10px] px-1.5 py-0">
+                                رصيد فائض: {formatCurrencyLYD(surplusAmount)}
+                              </Badge>
+                            )}
+                          </div>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <span>{format(new Date(payment.date), "dd MMM yyyy", { locale: ar })}</span>
                             <span>•</span>
