@@ -258,7 +258,9 @@ const ProjectPayments = () => {
           const srcTreasury = allTreasuries?.find(t => t.id === (p as any).treasury_id);
           const srcParent = srcTreasury?.parent_id ? allTreasuries?.find(t => t.id === srcTreasury.parent_id) : null;
           const phase = phases?.find(ph => ph.id === p.phase_id);
-          const pct = phase?.has_percentage ? Number(phase.percentage_value) : 0;
+          const pct = phase?.has_percentage 
+            ? Number(phase.percentage_value) 
+            : (project?.project_type === "finishing" ? Number(project.finishing_percentage || 0) : 0);
           invoices.push({
             id: p.id, type: "purchase",
             description: `فاتورة مشتريات ${p.invoice_number || ''}`.trim(),
@@ -298,7 +300,9 @@ const ProjectPayments = () => {
           const srcTreasury = allTreasuries?.find(t => t.id === (p as any).treasury_id);
           const srcParent = srcTreasury?.parent_id ? allTreasuries?.find(t => t.id === srcTreasury.parent_id) : null;
           const phase = phases?.find(ph => ph.id === p.phase_id);
-          const pct = phase?.has_percentage ? Number(phase.percentage_value) : 0;
+          const pct = phase?.has_percentage 
+            ? Number(phase.percentage_value) 
+            : (project?.project_type === "finishing" ? Number(project.finishing_percentage || 0) : 0);
           invoices.push({
             id: p.id, type: "rental",
             description: `فاتورة إيجار معدات`,

@@ -108,8 +108,8 @@ export function ProjectNavBar() {
   // Filter tabs by role and project type
   const visibleTabs = allTabs.filter((tab) => {
     if (isFinishing) {
-      // Finishing projects only care about purchases and expenses
-      return tab.name === "المشتريات" || tab.name === "المصروفات";
+      // Finishing projects use phases but have no contracting items (البنود)
+      return tab.name !== "البنود";
     }
     if (isEngineer) {
       // Engineers can see main tabs but not finance (except equipment)
@@ -183,7 +183,7 @@ export function ProjectNavBar() {
 
             <ChevronRight className="h-3 w-3 shrink-0" />
             <Link
-              to={isFinishing ? `/projects/${id}/purchases` : `/projects/${id}/phases`}
+              to={`/projects/${id}/phases`}
               className="hover:text-primary transition-colors font-semibold text-foreground truncate max-w-[160px] cursor-pointer"
             >
               {project?.name || "..."}

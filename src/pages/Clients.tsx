@@ -131,36 +131,43 @@ export default function Clients() {
 
     return clients.map((client) => {
       const clientProjList = projects.filter((p) => p.client_id === client.id) || [];
-      const projectIds = clientProjList.map((p) => p.id);
+      
+      let totalBilled = 0;
 
-      const clientPhases = phases.filter((ph) => projectIds.includes(ph.project_id)) || [];
+      clientProjList.forEach((proj) => {
+        const projItems = projectItems.filter((item) => item.project_id === proj.id);
+        const projPurchases = purchases.filter((p) => p.project_id === proj.id && p.rental_id === null);
+        const projRentals = purchases.filter((p) => p.project_id === proj.id && p.rental_id !== null);
 
-      let totalItemsBilled = 0;
-      let totalPurchBilled = 0;
-      let totalRentBilled = 0;
-      let totalPercentageFeeBilled = 0;
+        const itemsSum = projItems.reduce((sum, item) => sum + Number(item.total_price || 0), 0);
+        const purchSum = projPurchases.reduce((sum, p) => sum + Number(p.total_amount || 0), 0);
+        const rentSum = projRentals.reduce((sum, r) => sum + Number(r.total_amount || 0), 0);
 
-      clientPhases.forEach((phase) => {
-        const phaseItems = projectItems.filter((item) => item.phase_id === phase.id);
-        const phasePurchases = purchases.filter((p) => p.phase_id === phase.id && p.rental_id === null);
-        const phaseRentals = purchases.filter((p) => p.phase_id === phase.id && p.rental_id !== null);
+        let percentageFeeSum = 0;
+        const allProjPurchasesAndRentals = purchases.filter((p) => p.project_id === proj.id);
+        
+        allProjPurchasesAndRentals.forEach((p) => {
+          let pct = 0;
+          if (p.phase_id) {
+            const phase = phases.find((ph) => ph.id === p.phase_id);
+            if (phase) {
+              pct = phase.has_percentage && phase.percentage_value > 0 
+                ? Number(phase.percentage_value) 
+                : (proj.project_type === "finishing" ? Number(proj.finishing_percentage || 0) : 0);
+            } else {
+              pct = proj.project_type === "finishing" ? Number(proj.finishing_percentage || 0) : 0;
+            }
+          } else {
+            pct = proj.project_type === "finishing" ? Number(proj.finishing_percentage || 0) : 0;
+          }
+          
+          if (pct > 0) {
+            percentageFeeSum += (Number(p.total_amount || 0) * pct) / 100;
+          }
+        });
 
-        const phaseItemsSum = phaseItems.reduce((sum, item) => sum + Number(item.total_price || 0), 0);
-        const phasePurchSum = phasePurchases.reduce((sum, p) => sum + Number(p.total_amount || 0), 0);
-        const phaseRentSum = phaseRentals.reduce((sum, r) => sum + Number(r.total_amount || 0), 0);
-
-        const projectOfPhase = clientProjList.find((p) => p.id === phase.project_id);
-        const projectPct = projectOfPhase?.project_type === "finishing" ? Number(projectOfPhase.finishing_percentage || 0) : 0;
-        const phasePercentage = phase.has_percentage && phase.percentage_value > 0 ? Number(phase.percentage_value) : projectPct;
-        const phasePercentageFee = phasePercentage > 0 ? (phasePurchSum + phaseRentSum) * phasePercentage / 100 : 0;
-
-        totalItemsBilled += phaseItemsSum;
-        totalPurchBilled += phasePurchSum;
-        totalRentBilled += phaseRentSum;
-        totalPercentageFeeBilled += phasePercentageFee;
+        totalBilled += itemsSum + purchSum + rentSum + percentageFeeSum;
       });
-
-      const totalBilled = totalItemsBilled + totalPurchBilled + totalRentBilled + totalPercentageFeeBilled;
 
       const clientPaymentsList = clientPayments.filter((cp) => cp.client_id === client.id);
       const totalPaid = clientPaymentsList.reduce((sum, cp) => sum + Number(cp.amount || 0), 0);

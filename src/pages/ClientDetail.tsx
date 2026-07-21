@@ -369,36 +369,43 @@ export default function ClientDetail() {
       return { totalBilled: 0, totalPaid: 0, remaining: 0, projectBills: {} as Record<string, number> };
     }
 
-    const projectIds = projects.map((p) => p.id);
-    const clientPhases = phases.filter((ph) => projectIds.includes(ph.project_id));
-
     let totalBilled = 0;
     const projectBills: Record<string, number> = {};
 
     projects.forEach((proj) => {
-      projectBills[proj.id] = 0;
-    });
+      const projItems = projectItems.filter((item) => item.project_id === proj.id);
+      const projPurchases = purchases.filter((p) => p.project_id === proj.id && p.rental_id === null);
+      const projRentals = purchases.filter((p) => p.project_id === proj.id && p.rental_id !== null);
 
-    clientPhases.forEach((phase) => {
-      const phaseItems = projectItems.filter((item) => item.phase_id === phase.id);
-      const phasePurchases = purchases.filter((p) => p.phase_id === phase.id && p.rental_id === null);
-      const phaseRentals = purchases.filter((p) => p.phase_id === phase.id && p.rental_id !== null);
+      const itemsSum = projItems.reduce((sum, item) => sum + Number(item.total_price || 0), 0);
+      const purchSum = projPurchases.reduce((sum, p) => sum + Number(p.total_amount || 0), 0);
+      const rentSum = projRentals.reduce((sum, r) => sum + Number(r.total_amount || 0), 0);
 
-      const phaseItemsSum = phaseItems.reduce((sum, item) => sum + Number(item.total_price || 0), 0);
-      const phasePurchSum = phasePurchases.reduce((sum, p) => sum + Number(p.total_amount || 0), 0);
-      const phaseRentSum = phaseRentals.reduce((sum, r) => sum + Number(r.total_amount || 0), 0);
+      let percentageFeeSum = 0;
+      const allProjPurchasesAndRentals = purchases.filter((p) => p.project_id === proj.id);
+      allProjPurchasesAndRentals.forEach((p) => {
+        let pct = 0;
+        if (p.phase_id) {
+          const phase = phases.find((ph) => ph.id === p.phase_id);
+          if (phase) {
+            pct = phase.has_percentage && phase.percentage_value > 0 
+              ? Number(phase.percentage_value) 
+              : (proj.project_type === "finishing" ? Number(proj.finishing_percentage || 0) : 0);
+          } else {
+            pct = proj.project_type === "finishing" ? Number(proj.finishing_percentage || 0) : 0;
+          }
+        } else {
+          pct = proj.project_type === "finishing" ? Number(proj.finishing_percentage || 0) : 0;
+        }
+        
+        if (pct > 0) {
+          percentageFeeSum += (Number(p.total_amount || 0) * pct) / 100;
+        }
+      });
 
-      const projectOfPhase = projects.find((p) => p.id === phase.project_id);
-      const projectPct = projectOfPhase?.project_type === "finishing" ? Number(projectOfPhase.finishing_percentage || 0) : 0;
-      const phasePercentage = phase.has_percentage && phase.percentage_value > 0 ? Number(phase.percentage_value) : projectPct;
-      const phasePercentageFee = phasePercentage > 0 ? (phasePurchSum + phaseRentSum) * phasePercentage / 100 : 0;
-
-      const phaseTotal = phaseItemsSum + phasePurchSum + phaseRentSum + phasePercentageFee;
-
-      totalBilled += phaseTotal;
-      if (projectBills[phase.project_id] !== undefined) {
-        projectBills[phase.project_id] += phaseTotal;
-      }
+      const projectTotal = itemsSum + purchSum + rentSum + percentageFeeSum;
+      projectBills[proj.id] = projectTotal;
+      totalBilled += projectTotal;
     });
 
     const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
@@ -1043,7 +1050,7 @@ export default function ClientDetail() {
                       </TableCell>
                       <TableCell className="text-left">
                         <Button variant="ghost" size="sm" asChild className="cursor-pointer">
-                          <Link to={project.project_type === "finishing" ? `/projects/${project.id}/purchases` : `/projects/${project.id}/phases`}>
+                          <Link to={`/projects/${project.id}/phases`}>
                             <span>عرض التفاصيل</span>
                             <ArrowUpRight className="h-4 w-4 mr-1" />
                           </Link>

@@ -2040,14 +2040,16 @@ const ProjectPhases = () => {
                       
                       {/* Action Buttons */}
                       <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => navigate(`/projects/${projectId}/phases/${phase.id}/items`)}
-                        >
-                          <Package className="h-4 w-4 ml-2" />
-                          فاتورة بنود المقاولات
-                        </Button>
+                        {project?.project_type !== "finishing" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate(`/projects/${projectId}/phases/${phase.id}/items`)}
+                          >
+                            <Package className="h-4 w-4 ml-2" />
+                            فاتورة بنود المقاولات
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"

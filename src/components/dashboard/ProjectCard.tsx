@@ -197,31 +197,8 @@ export const ProjectCard = ({
 
         {/* Action Buttons */}
         <div className="pt-2 border-t border-border space-y-2">
-          {projectType === "finishing" ? (
-            // Layout for finishing projects (No phases, items, progress, equipment, or contracts)
-            <div className="grid grid-cols-3 gap-2">
-              <Link to={`/projects/${id}/purchases`} className="w-full">
-                <Button variant="outline" size="sm" className="w-full gap-1 h-9 text-xs px-1 border-primary/20 hover:border-primary/40">
-                  <ShoppingCart className="h-3.5 w-3.5 shrink-0 text-primary" />
-                  <span className="truncate">المشتريات</span>
-                </Button>
-              </Link>
-              <Link to={`/projects/${id}/expenses`} className="w-full">
-                <Button variant="outline" size="sm" className="w-full gap-1 h-9 text-xs px-1">
-                  <Coins className="h-3.5 w-3.5 shrink-0 text-orange-500" />
-                  <span className="truncate">المصروفات</span>
-                </Button>
-              </Link>
-              <Link to={`/projects/${id}/report`} className="w-full">
-                <Button variant="outline" size="sm" className="w-full gap-1 h-9 text-xs px-1">
-                  <Printer className="h-3.5 w-3.5 shrink-0 text-amber-600" />
-                  <span className="truncate">التقرير</span>
-                </Button>
-              </Link>
-            </div>
-          ) : (
-            // Standard layout for contracting projects
-            <>
+          {/* Standard layout for all projects */}
+          <>
               <div className="grid grid-cols-3 gap-2">
                 <Link to={`/projects/${id}/phases`}>
                   <Button variant="outline" size="sm" className="w-full gap-1.5 h-9">
@@ -265,8 +242,7 @@ export const ProjectCard = ({
                   </Link>
                 </div>
               )}
-            </>
-          )}
+          </>
         </div>
       </div>
     </Card>

@@ -380,7 +380,7 @@ const Projects = ({ type }: ProjectsProps = {}) => {
             return (
               <Card
                 key={project.id}
-                onClick={() => navigate(project.project_type === 'finishing' ? `/projects/${project.id}/purchases` : `/projects/${project.id}/phases`)}
+                onClick={() => navigate(`/projects/${project.id}/phases`)}
                 className="overflow-hidden transition-all hover:shadow-md cursor-pointer group flex flex-col border hover:border-primary/30 relative"
               >
                 {/* Project Image Header */}
@@ -564,12 +564,12 @@ const Projects = ({ type }: ProjectsProps = {}) => {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => navigate(project.project_type === 'finishing' ? `/projects/${project.id}/items` : `/projects/${project.id}/phases`)}
+                      onClick={() => navigate(`/projects/${project.id}/phases`)}
                       className="h-8 gap-1.5 rounded-full hover:bg-primary/10 hover:text-primary transition-all cursor-pointer text-muted-foreground text-xs px-3"
-                      title={project.project_type === 'finishing' ? 'البنود' : 'المراحل'}
+                      title="المراحل"
                     >
                       <Layers className="h-3.5 w-3.5" />
-                      {project.project_type === 'finishing' ? 'البنود' : 'المراحل'}
+                      المراحل
                     </Button>
                     {!isEngineer && (
                       <Button
@@ -688,7 +688,7 @@ const Projects = ({ type }: ProjectsProps = {}) => {
                   return (
                     <TableRow
                       key={project.id}
-                      onClick={() => navigate(project.project_type === 'finishing' ? `/projects/${project.id}/purchases` : `/projects/${project.id}/phases`)}
+                      onClick={() => navigate(`/projects/${project.id}/phases`)}
                       className="cursor-pointer hover:bg-muted/30 transition-colors group"
                     >
                       <TableCell className="font-medium">
