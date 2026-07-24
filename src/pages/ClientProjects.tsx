@@ -1,10 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { ProjectCard } from "@/components/dashboard/ProjectCard";
-import { Plus, ArrowRight } from "lucide-react";
+import { Plus, ArrowRight, Hammer, Paintbrush, FolderOpen } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { formatCurrencyLYD } from "@/lib/currency";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 const ClientProjects = () => {
   const navigate = useNavigate();
@@ -113,8 +114,50 @@ const ClientProjects = () => {
     );
   }
 
+  const contractingCount = (projects || []).filter((p) => p.project_type === "contracting").length;
+  const finishingCount = (projects || []).filter((p) => p.project_type === "finishing").length;
+
+  const renderProjectGrid = (projectList: typeof projects) => {
+    if (!projectList || projectList.length === 0) {
+      return (
+        <div className="text-center py-12 bg-muted/30 rounded-lg">
+          <p className="text-muted-foreground mb-4">لا توجد مشاريع في هذا القسم</p>
+          <Button onClick={() => navigate(`/projects/new?client_id=${clientId}&returnTo=/projects/client/${clientId}`)}>
+            <Plus className="h-4 w-4 ml-2" />
+            إضافة مشروع جديد
+          </Button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {projectList.map((project) => {
+          const summary = projectSummaries[project.id] || { purchases: 0, expenses: 0, rentals: 0, custody: 0 };
+          return (
+            <ProjectCard 
+              key={project.id}
+              id={project.id}
+              name={project.name}
+              progress={project.progress}
+              status={project.status as "active" | "pending" | "completed" | "cancelled"}
+              budget={formatCurrencyLYD(project.budget)}
+              spent={formatCurrencyLYD(project.spent)}
+              supervisingEngineerName={project.supervising_engineer?.name}
+              imageUrl={(project as any).image_url}
+              purchasesTotal={summary.purchases}
+              expensesTotal={summary.expenses}
+              rentalsTotal={summary.rentals}
+              custodyTotal={summary.custody}
+            />
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" dir="rtl">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Link to="/projects" className="hover:text-primary">
@@ -125,50 +168,44 @@ const ClientProjects = () => {
       </div>
 
       {/* Page Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-3xl font-bold mb-2">مشاريع {client?.name}</h1>
-          <p className="text-muted-foreground">إدارة مشاريع العميل</p>
+          <p className="text-muted-foreground">إدارة مشاريع العميل مفرزة حسب نوع المشروع</p>
         </div>
-        <Button className="gap-2" onClick={() => navigate(`/projects/new?client_id=${clientId}&returnTo=/projects/client/${clientId}`)}>
+        <Button className="gap-2 cursor-pointer font-bold" onClick={() => navigate(`/projects/new?client_id=${clientId}&returnTo=/projects/client/${clientId}`)}>
           <Plus className="h-5 w-5" />
           مشروع جديد
         </Button>
       </div>
 
-      {/* Projects Grid */}
-      {projects && projects.length > 0 ? (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project) => {
-            const summary = projectSummaries[project.id] || { purchases: 0, expenses: 0, rentals: 0, custody: 0 };
-            return (
-              <ProjectCard 
-                key={project.id}
-                id={project.id}
-                name={project.name}
-                progress={project.progress}
-                status={project.status as "active" | "pending" | "completed" | "cancelled"}
-                budget={formatCurrencyLYD(project.budget)}
-                spent={formatCurrencyLYD(project.spent)}
-                supervisingEngineerName={project.supervising_engineer?.name}
-                imageUrl={(project as any).image_url}
-                purchasesTotal={summary.purchases}
-                expensesTotal={summary.expenses}
-                rentalsTotal={summary.rentals}
-                custodyTotal={summary.custody}
-              />
-            );
-          })}
-        </div>
-      ) : (
-        <div className="text-center py-12 bg-muted/30 rounded-lg">
-          <p className="text-muted-foreground mb-4">لا توجد مشاريع لهذا العميل</p>
-          <Button onClick={() => navigate(`/projects/new?client_id=${clientId}&returnTo=/projects/client/${clientId}`)}>
-            <Plus className="h-4 w-4 ml-2" />
-            إضافة مشروع جديد
-          </Button>
-        </div>
-      )}
+      {/* Tabs Filter */}
+      <Tabs defaultValue="all" dir="rtl" className="w-full space-y-6">
+        <TabsList className="bg-muted p-1">
+          <TabsTrigger value="all" className="gap-1.5 cursor-pointer text-sm font-semibold">
+            <FolderOpen className="h-4 w-4" />
+            <span>جميع المشاريع ({projects?.length || 0})</span>
+          </TabsTrigger>
+          <TabsTrigger value="contracting" className="gap-1.5 cursor-pointer text-sm font-semibold">
+            <Hammer className="h-4 w-4 text-amber-500" />
+            <span>مشاريع المقاولات ({contractingCount})</span>
+          </TabsTrigger>
+          <TabsTrigger value="finishing" className="gap-1.5 cursor-pointer text-sm font-semibold">
+            <Paintbrush className="h-4 w-4 text-blue-500" />
+            <span>مشاريع التشطيب ({finishingCount})</span>
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="all">
+          {renderProjectGrid(projects)}
+        </TabsContent>
+        <TabsContent value="contracting">
+          {renderProjectGrid((projects || []).filter((p) => p.project_type === "contracting"))}
+        </TabsContent>
+        <TabsContent value="finishing">
+          {renderProjectGrid((projects || []).filter((p) => p.project_type === "finishing"))}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

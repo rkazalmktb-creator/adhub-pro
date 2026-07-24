@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Phone, Mail, Truck, Building, ShoppingCart, FolderOpen, Edit, Trash2 } from "lucide-react";
+import { Plus, Phone, Mail, Truck, Building, ShoppingCart, FolderOpen, Edit, Trash2, Settings, Sparkles } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -126,21 +126,26 @@ export default function Suppliers() {
               totalAmount: 0,
               paidAmount: 0,
               contractingAmount: 0,
+              contractingPaid: 0,
               finishingAmount: 0,
+              finishingPaid: 0,
               clients: new Set(),
               projects: new Set(),
             };
           }
           const amt = Number(purchase.total_amount) || 0;
+          const paid = Number(purchase.paid_amount) || 0;
           stats[purchase.supplier_id].purchaseCount++;
           stats[purchase.supplier_id].totalAmount += amt;
-          stats[purchase.supplier_id].paidAmount += Number(purchase.paid_amount) || 0;
+          stats[purchase.supplier_id].paidAmount += paid;
           
           const isFinishing = purchase.projects?.project_type === 'finishing';
           if (isFinishing) {
             stats[purchase.supplier_id].finishingAmount += amt;
+            stats[purchase.supplier_id].finishingPaid += paid;
           } else {
             stats[purchase.supplier_id].contractingAmount += amt;
+            stats[purchase.supplier_id].contractingPaid += paid;
           }
           
           if (purchase.project_id) {
@@ -575,12 +580,16 @@ export default function Suppliers() {
 
                   {/* Purchases Breakdown by Project Type */}
                   <div className="pt-2 text-xs space-y-1 bg-muted/40 p-2 rounded-lg border">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground text-[10px]">⚙️ فواتير المقاولات:</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground text-[10px] flex items-center gap-1">
+                        <Settings className="h-3 w-3 text-blue-600 inline" /> فواتير المقاولات:
+                      </span>
                       <span className="font-semibold text-foreground text-[11px]">{formatCurrencyLYD(stats.contractingAmount)}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground text-[10px]">✨ فواتير التشطيبات:</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground text-[10px] flex items-center gap-1">
+                        <Sparkles className="h-3 w-3 text-purple-600 inline" /> فواتير التشطيبات:
+                      </span>
                       <span className="font-semibold text-primary text-[11px]">{formatCurrencyLYD(stats.finishingAmount)}</span>
                     </div>
                   </div>

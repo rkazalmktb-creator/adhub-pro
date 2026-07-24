@@ -14,7 +14,7 @@ import { formatCurrencyLYD } from "@/lib/currency";
 import { useToast } from "@/hooks/use-toast";
 import {
   TrendingUp, TrendingDown, Wallet, Plus, Trash2, AlertCircle,
-  CheckCircle2, BarChart3, ArrowLeftRight, ChevronDown, ChevronUp,
+  CheckCircle2, BarChart3, ArrowLeftRight, ChevronDown, ChevronUp, ArrowDownLeft, ArrowUpRight,
 } from "lucide-react";
 
 const MONTHS = [
@@ -93,7 +93,7 @@ const CashFlow = () => {
       qc.invalidateQueries({ queryKey: ["cash-flow"] });
       setShowForm(false);
       setForm(emptyForm);
-      toast({ title: "✅ تمت الإضافة بنجاح" });
+      toast({ title: "تمت الإضافة بنجاح" });
     },
     onError: () => toast({ title: "خطأ في الحفظ", variant: "destructive" }),
   });
@@ -105,7 +105,7 @@ const CashFlow = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["cash-flow"] });
-      toast({ title: "✅ تم الحذف" });
+      toast({ title: "تم الحذف بنجاح" });
     },
   });
 
@@ -163,7 +163,15 @@ const CashFlow = () => {
               {formatCurrencyLYD(totalInflow - totalOutflow)}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              {totalInflow - totalOutflow >= 0 ? "✅ إيجابي" : "⚠️ سلبي — خطر سيولة"}
+              {totalInflow - totalOutflow >= 0 ? (
+                <span className="text-emerald-600 font-medium flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3 inline" /> إيجابي
+                </span>
+              ) : (
+                <span className="text-destructive font-medium flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3 inline" /> سلبي — خطر سيولة
+                </span>
+              )}
             </p>
           </CardContent>
         </Card>
@@ -218,7 +226,9 @@ const CashFlow = () => {
 
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               <div className="space-y-3 p-4 rounded-lg bg-green-500/5 border border-green-500/20">
-                <p className="text-sm font-semibold text-green-700 dark:text-green-400">📥 التحصيلات (إيرادات)</p>
+                <p className="text-sm font-semibold text-green-700 dark:text-green-400 flex items-center gap-1.5">
+                  <ArrowDownLeft className="h-4 w-4 inline" /> التحصيلات (إيرادات)
+                </p>
                 <div className="grid gap-2 md:grid-cols-2">
                   <div>
                     <Label className="text-xs">الفوترة المتوقعة</Label>
@@ -231,7 +241,7 @@ const CashFlow = () => {
                       onChange={e => setForm(f => ({ ...f, expected_collection: e.target.value }))} />
                   </div>
                   <div className="md:col-span-2">
-                    <Label className="text-xs">التحصيل الفعلي ✅</Label>
+                    <Label className="text-xs">التحصيل الفعلي</Label>
                     <Input type="number" placeholder="0" value={form.actual_collected}
                       onChange={e => setForm(f => ({ ...f, actual_collected: e.target.value }))} />
                   </div>
@@ -239,7 +249,9 @@ const CashFlow = () => {
               </div>
 
               <div className="space-y-3 p-4 rounded-lg bg-red-500/5 border border-red-500/20">
-                <p className="text-sm font-semibold text-red-700 dark:text-red-400">📤 المدفوعات (مصروفات)</p>
+                <p className="text-sm font-semibold text-red-700 dark:text-red-400 flex items-center gap-1.5">
+                  <ArrowUpRight className="h-4 w-4 inline" /> المدفوعات (مصروفات)
+                </p>
                 <div className="grid gap-2 md:grid-cols-2">
                   <div>
                     <Label className="text-xs">مشتريات مخططة</Label>
@@ -262,7 +274,7 @@ const CashFlow = () => {
                       onChange={e => setForm(f => ({ ...f, planned_overhead: e.target.value }))} />
                   </div>
                   <div className="md:col-span-2">
-                    <Label className="text-xs">المدفوع فعلياً ✅</Label>
+                    <Label className="text-xs">المدفوع فعلياً</Label>
                     <Input type="number" placeholder="0" value={form.actual_paid}
                       onChange={e => setForm(f => ({ ...f, actual_paid: e.target.value }))} />
                   </div>

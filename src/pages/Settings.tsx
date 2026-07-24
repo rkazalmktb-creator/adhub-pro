@@ -51,6 +51,8 @@ const Settings = () => {
   const [companyPhone, setCompanyPhone] = useState("");
   const [companyAddress, setCompanyAddress] = useState("");
   const [companyTagline, setCompanyTagline] = useState("");
+  const [signeeName, setSigneeName] = useState("");
+  const [signeeTitle, setSigneeTitle] = useState("");
   
   const [imageUploadProvider, setImageUploadProvider] = useState("supabase_storage");
   const [imgbbApiKey, setImgbbApiKey] = useState("");
@@ -81,7 +83,7 @@ const Settings = () => {
         .from("company_settings")
         .select("*")
         .limit(1)
-        .single();
+        .maybeSingle();
       
       if (error) throw error;
       return data;
@@ -124,6 +126,8 @@ const Settings = () => {
       setGoogleDriveScriptUrl(sData.google_drive_script_url || "");
       setContractingTreasuryId(sData.contracting_treasury_id || "");
       setFinishingTreasuryId(sData.finishing_treasury_id || "");
+      setSigneeName(sData.signee_name || "");
+      setSigneeTitle(sData.signee_title || "");
     }
   }, [settings]);
 
@@ -170,6 +174,8 @@ const Settings = () => {
           google_drive_script_url: googleDriveScriptUrl || null,
           contracting_treasury_id: contractingTreasuryId || null,
           finishing_treasury_id: finishingTreasuryId || null,
+          signee_name: signeeName || null,
+          signee_title: signeeTitle || null,
         } as any)
         .eq("id", settings.id);
 
@@ -370,6 +376,32 @@ const Settings = () => {
                     value={companyAddress}
                     onChange={(e) => setCompanyAddress(e.target.value)}
                     placeholder="مثال: طرابلس، ليبيا - شارع النصر..."
+                    className="border-border bg-background focus:ring-primary focus:border-primary text-right"
+                  />
+                </div>
+
+                {/* Signee Name */}
+                <div className="space-y-2">
+                  <Label htmlFor="signee-name" className="text-sm font-semibold">اسم الموقّع الافتراضي للفواتير</Label>
+                  <Input
+                    id="signee-name"
+                    disabled={!isAdmin}
+                    value={signeeName}
+                    onChange={(e) => setSigneeName(e.target.value)}
+                    placeholder="مثال: علي بن عروس شميله..."
+                    className="border-border bg-background focus:ring-primary focus:border-primary text-right"
+                  />
+                </div>
+
+                {/* Signee Title */}
+                <div className="space-y-2">
+                  <Label htmlFor="signee-title" className="text-sm font-semibold">صفة الموقّع الافتراضي</Label>
+                  <Input
+                    id="signee-title"
+                    disabled={!isAdmin}
+                    value={signeeTitle}
+                    onChange={(e) => setSigneeTitle(e.target.value)}
+                    placeholder="مثال: المهندس المشرف..."
                     className="border-border bg-background focus:ring-primary focus:border-primary text-right"
                   />
                 </div>

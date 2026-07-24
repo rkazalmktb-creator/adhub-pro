@@ -28,7 +28,10 @@ import {
   ArrowUpRight,
   Coins,
   Plus,
+  Hammer,
+  Paintbrush,
 } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { formatCurrencyLYD } from "@/lib/currency";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -108,6 +111,10 @@ type ClientPayment = {
   treasuries?: {
     name: string;
   } | null;
+  projects?: {
+    name: string;
+    project_type: string;
+  } | null;
 };
 
 type Contract = {
@@ -158,6 +165,8 @@ export default function ClientDetail() {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [selectedParentTreasuryId, setSelectedParentTreasuryId] = useState("");
   const [selectedTreasuryId, setSelectedTreasuryId] = useState("");
+  const [paymentProjectType, setPaymentProjectType] = useState<"all" | "contracting" | "finishing">("all");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [notes, setNotes] = useState("");
 
   // Fetch company settings for printing
@@ -218,13 +227,13 @@ export default function ClientDetail() {
     enabled: !!id,
   });
 
-  // Fetch client payments with treasury names
+  // Fetch client payments with treasury and project names
   const { data: payments } = useQuery<ClientPayment[]>({
     queryKey: ["client-payments-list", id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("client_payments")
-        .select("id, amount, date, payment_method, notes, project_id, treasuries(name)")
+        .select("id, amount, date, payment_method, notes, project_id, treasuries(name), projects(name, project_type)")
         .eq("client_id", id!)
         .order("date", { ascending: false });
       if (error) throw error;
@@ -232,6 +241,13 @@ export default function ClientDetail() {
     },
     enabled: !!id,
   });
+
+  // Filter projects for payment selection based on selected project type
+  const filteredProjectsForPayment = useMemo(() => {
+    if (!projects) return [];
+    if (paymentProjectType === "all") return projects;
+    return projects.filter((p) => p.project_type === paymentProjectType);
+  }, [projects, paymentProjectType]);
 
   // Fetch active treasuries
   const { data: treasuries } = useQuery<Treasury[]>({
@@ -305,12 +321,14 @@ export default function ClientDetail() {
         throw new Error("يجب اختيار الخزينة المستلمة");
       }
 
+      const targetProjId = selectedProjectId && selectedProjectId !== "none" ? selectedProjectId : null;
+
       // 1. Insert Client Payment
       const { data: payment, error: payErr } = await supabase
         .from("client_payments")
         .insert({
           client_id: id!,
-          project_id: null,
+          project_id: targetProjId,
           amount: amt,
           date: paymentDate,
           payment_method: paymentMethod,
@@ -325,18 +343,32 @@ export default function ClientDetail() {
       const { error: incErr } = await supabase
         .from("income")
         .insert({
-          project_id: null,
+          project_id: targetProjId,
           client_id: id!,
           amount: amt,
           date: paymentDate,
           type: "service",
           subtype: "client_payment",
           payment_method: paymentMethod,
-          notes: notes || `تسديد دفعة عامة (رصيد زبون)`,
+          notes: notes || (targetProjId ? `تسديد دفعة لمشروع` : `تسديد دفعة عامة (رصيد زبون)`),
           status: "received",
           reference_id: payment.id,
         });
       if (incErr) throw incErr;
+
+      // 3. Log Treasury Transaction
+      await supabase.from("treasury_transactions").insert({
+        treasury_id: selectedTreasuryId,
+        type: "deposit",
+        amount: amt,
+        balance_after: 0,
+        description: `تسديد من الزبون: ${client?.name || ""}`,
+        date: paymentDate,
+        source: "client_payment",
+        reference_type: "client_payment",
+        reference_id: payment.id,
+        notes: notes || null,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["client", id] });
@@ -346,12 +378,16 @@ export default function ClientDetail() {
       queryClient.invalidateQueries({ queryKey: ["all-clients-debts"] });
       queryClient.invalidateQueries({ queryKey: ["treasuries-active-client-detail"] });
       queryClient.invalidateQueries({ queryKey: ["treasuries-active"] });
+      queryClient.invalidateQueries({ queryKey: ["treasuries"] });
+      queryClient.invalidateQueries({ queryKey: ["treasury_transactions"] });
       toast.success("تم تسجيل الدفعة وإضافتها للخزينة بنجاح");
       setPaymentDialogOpen(false);
       setPaymentAmount("");
       setNotes("");
       setSelectedParentTreasuryId("");
       setSelectedTreasuryId("");
+      setPaymentProjectType("all");
+      setSelectedProjectId("");
     },
     onError: (err: any) => {
       toast.error(err.message || "حدث خطأ أثناء تسجيل الدفعة");
@@ -366,10 +402,27 @@ export default function ClientDetail() {
   // Calculate detailed financial totals
   const clientFinancials = useMemo(() => {
     if (!projects || !phases || !projectItems || !purchases || !payments) {
-      return { totalBilled: 0, totalPaid: 0, remaining: 0, projectBills: {} as Record<string, number> };
+      return {
+        totalBilled: 0,
+        totalPaid: 0,
+        remaining: 0,
+        contractingBilled: 0,
+        finishingBilled: 0,
+        contractingCount: 0,
+        finishingCount: 0,
+        contractingPaid: 0,
+        finishingPaid: 0,
+        contractingRemaining: 0,
+        finishingRemaining: 0,
+        projectBills: {} as Record<string, number>,
+      };
     }
 
     let totalBilled = 0;
+    let contractingBilled = 0;
+    let finishingBilled = 0;
+    let contractingCount = 0;
+    let finishingCount = 0;
     const projectBills: Record<string, number> = {};
 
     projects.forEach((proj) => {
@@ -381,6 +434,12 @@ export default function ClientDetail() {
       const purchSum = projPurchases.reduce((sum, p) => sum + Number(p.total_amount || 0), 0);
       const rentSum = projRentals.reduce((sum, r) => sum + Number(r.total_amount || 0), 0);
 
+      // Sum active contracts for this project or contracting project of this client
+      const projContracts = (contracts || []).filter(
+        (c) => c.status !== "cancelled" && (c.project_id === proj.id || (!c.project_id && c.client_id === proj.client_id && proj.project_type === "contracting"))
+      );
+      const contractsSum = projContracts.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+
       let percentageFeeSum = 0;
       const allProjPurchasesAndRentals = purchases.filter((p) => p.project_id === proj.id);
       allProjPurchasesAndRentals.forEach((p) => {
@@ -390,12 +449,12 @@ export default function ClientDetail() {
           if (phase) {
             pct = phase.has_percentage && phase.percentage_value > 0 
               ? Number(phase.percentage_value) 
-              : (proj.project_type === "finishing" ? Number(proj.finishing_percentage || 0) : 0);
+              : (proj.project_type === "finishing" ? Number((proj as any).finishing_percentage || 0) : 0);
           } else {
-            pct = proj.project_type === "finishing" ? Number(proj.finishing_percentage || 0) : 0;
+            pct = proj.project_type === "finishing" ? Number((proj as any).finishing_percentage || 0) : 0;
           }
         } else {
-          pct = proj.project_type === "finishing" ? Number(proj.finishing_percentage || 0) : 0;
+          pct = proj.project_type === "finishing" ? Number((proj as any).finishing_percentage || 0) : 0;
         }
         
         if (pct > 0) {
@@ -403,10 +462,39 @@ export default function ClientDetail() {
         }
       });
 
-      const projectTotal = itemsSum + purchSum + rentSum + percentageFeeSum;
+      const budgetVal = Number(proj.budget || 0);
+
+      // Base project value: maximum of executed items, signed contracts, or approved budget
+      const projectBaseValue = Math.max(itemsSum, contractsSum, budgetVal);
+
+      const projectTotal = projectBaseValue + purchSum + rentSum + percentageFeeSum;
       projectBills[proj.id] = projectTotal;
       totalBilled += projectTotal;
+
+      if (proj.project_type === "contracting") {
+        contractingBilled += projectTotal;
+        contractingCount++;
+      } else {
+        finishingBilled += projectTotal;
+        finishingCount++;
+      }
     });
+
+    let contractingPaid = 0;
+    let finishingPaid = 0;
+
+    (payments || []).forEach((p) => {
+      const amt = Number(p.amount || 0);
+      const projType = (p as any).projects?.project_type;
+      if (projType === "contracting") {
+        contractingPaid += amt;
+      } else if (projType === "finishing") {
+        finishingPaid += amt;
+      }
+    });
+
+    const contractingRemaining = contractingBilled - contractingPaid;
+    const finishingRemaining = finishingBilled - finishingPaid;
 
     const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
     const remaining = totalBilled - totalPaid;
@@ -415,9 +503,73 @@ export default function ClientDetail() {
       totalBilled,
       totalPaid,
       remaining,
+      contractingBilled,
+      finishingBilled,
+      contractingCount,
+      finishingCount,
+      contractingPaid,
+      finishingPaid,
+      contractingRemaining,
+      finishingRemaining,
       projectBills,
     };
-  }, [projects, phases, projectItems, purchases, payments]);
+  }, [projects, phases, projectItems, purchases, payments, contracts]);
+
+  const totalContractsAmount = useMemo(() => {
+    if (!contracts) return 0;
+    return contracts.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+  }, [contracts]);
+
+  // Comprehensive Payments Summary Breakdown
+  const paymentsSummary = useMemo(() => {
+    if (!payments) {
+      return {
+        totalPaid: 0,
+        contractingPaid: 0,
+        finishingPaid: 0,
+        generalPaid: 0,
+        cashPaid: 0,
+        bankPaid: 0,
+        count: 0,
+      };
+    }
+
+    let contractingPaid = 0;
+    let finishingPaid = 0;
+    let generalPaid = 0;
+    let cashPaid = 0;
+    let bankPaid = 0;
+
+    payments.forEach((p) => {
+      const amt = Number(p.amount || 0);
+      const projType = (p as any).projects?.project_type;
+      if (projType === "contracting") {
+        contractingPaid += amt;
+      } else if (projType === "finishing") {
+        finishingPaid += amt;
+      } else {
+        generalPaid += amt;
+      }
+
+      if (p.payment_method === "cash") {
+        cashPaid += amt;
+      } else {
+        bankPaid += amt;
+      }
+    });
+
+    const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+    return {
+      totalPaid,
+      contractingPaid,
+      finishingPaid,
+      generalPaid,
+      cashPaid,
+      bankPaid,
+      count: payments.length,
+    };
+  }, [payments]);
 
   // Print Payment Receipt (إيصال قبض)
   const handlePrintReceipt = async (payment: any) => {
@@ -578,14 +730,29 @@ export default function ClientDetail() {
 
     const dateStr = format(new Date(), "yyyy/MM/dd", { locale: ar });
     
-    // Project billing list
-    let projectBillsHTML = "";
-    projects?.forEach((p) => {
+    const contractingProjects = projects?.filter((p) => p.project_type === "contracting") || [];
+    const finishingProjects = projects?.filter((p) => p.project_type === "finishing") || [];
+
+    // Contracting projects HTML
+    let contractingBillsHTML = "";
+    contractingProjects.forEach((p) => {
       const billAmount = clientFinancials.projectBills[p.id] || 0;
-      projectBillsHTML += `
+      contractingBillsHTML += `
         <tr>
           <td>${p.name}</td>
-          <td style="text-align: center;">${p.project_type === "contracting" ? "مقاولات" : "تشطيبات"}</td>
+          <td style="text-align: center;">${statusLabels[p.status] || p.status}</td>
+          <td style="text-align: center; font-weight: bold;">${billAmount.toLocaleString()} د.ل</td>
+        </tr>
+      `;
+    });
+
+    // Finishing projects HTML
+    let finishingBillsHTML = "";
+    finishingProjects.forEach((p) => {
+      const billAmount = clientFinancials.projectBills[p.id] || 0;
+      finishingBillsHTML += `
+        <tr>
+          <td>${p.name}</td>
           <td style="text-align: center;">${statusLabels[p.status] || p.status}</td>
           <td style="text-align: center; font-weight: bold;">${billAmount.toLocaleString()} د.ل</td>
         </tr>
@@ -645,10 +812,18 @@ export default function ClientDetail() {
           font-weight: bold;
           margin-top: 5px;
         }
+        .section-header {
+          border-bottom: 1.5px solid #000;
+          padding-bottom: 5px;
+          margin-top: 25px;
+          margin-bottom: 10px;
+          font-size: 12pt;
+          font-weight: bold;
+        }
         .data-table {
           width: 100%;
           border-collapse: collapse;
-          margin-bottom: 25px;
+          margin-bottom: 20px;
         }
         .data-table th, .data-table td {
           border: 1px solid #000;
@@ -685,6 +860,9 @@ export default function ClientDetail() {
           <div class="summary-item">
             <div>إجمالي الأعمال والبنود</div>
             <div class="summary-value" style="color: #000;">${clientFinancials.totalBilled.toLocaleString()} د.ل</div>
+            <div style="font-size: 8.5pt; color: #555; margin-top: 4px;">
+              مقاولات: ${clientFinancials.contractingBilled.toLocaleString()} د.ل | تشطيب: ${clientFinancials.finishingBilled.toLocaleString()} د.ل
+            </div>
           </div>
           <div class="summary-item">
             <div>إجمالي المسدد</div>
@@ -698,22 +876,41 @@ export default function ClientDetail() {
           </div>
         </div>
 
-        <h3 style="border-bottom: 1px solid #ddd; padding-bottom: 5px;">كشف الأعمال والمشاريع</h3>
+        <h3 class="section-header" style="display: flex; justify-content: space-between;">
+          <span>مشاريع المقاولات (${contractingProjects.length})</span>
+          <span style="font-size: 10.5pt; font-weight: normal;">إجمالي القسم: <strong>${clientFinancials.contractingBilled.toLocaleString()} د.ل</strong></span>
+        </h3>
         <table class="data-table">
           <thead>
             <tr>
               <th>اسم المشروع</th>
-              <th style="width: 18%;">نوع المشروع</th>
-              <th style="width: 18%;">حالة المشروع</th>
-              <th style="width: 25%;">قيمة الأعمال المنجزة</th>
+              <th style="width: 20%; text-align: center;">حالة المشروع</th>
+              <th style="width: 30%; text-align: center;">قيمة الأعمال المنجزة</th>
             </tr>
           </thead>
           <tbody>
-            ${projectBillsHTML || `<tr><td colspan="4" style="text-align: center;">لا توجد مشاريع مسجلة</td></tr>`}
+            ${contractingBillsHTML || `<tr><td colspan="3" style="text-align: center;">لا توجد مشاريع مقاولات مسجلة</td></tr>`}
           </tbody>
         </table>
 
-        <h3 style="border-bottom: 1px solid #ddd; padding-bottom: 5px; margin-top: 25px;">جدول الدفعات والتسديدات</h3>
+        <h3 class="section-header" style="display: flex; justify-content: space-between;">
+          <span>مشاريع التشطيبات (${finishingProjects.length})</span>
+          <span style="font-size: 10.5pt; font-weight: normal;">إجمالي القسم: <strong>${clientFinancials.finishingBilled.toLocaleString()} د.ل</strong></span>
+        </h3>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>اسم المشروع</th>
+              <th style="width: 20%; text-align: center;">حالة المشروع</th>
+              <th style="width: 30%; text-align: center;">قيمة الأعمال المنجزة</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${finishingBillsHTML || `<tr><td colspan="3" style="text-align: center;">لا توجد مشاريع تشطيب مسجلة</td></tr>`}
+          </tbody>
+        </table>
+
+        <h3 class="section-header" style="margin-top: 25px;">جدول الدفعات والتسديدات المستلمة</h3>
         <table class="data-table">
           <thead>
             <tr>
@@ -800,6 +997,48 @@ export default function ClientDetail() {
                     placeholder="0.00 د.ل"
                     className="text-lg font-bold"
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>نوع المشروع *</Label>
+                    <Select
+                      value={paymentProjectType}
+                      onValueChange={(val: any) => {
+                        setPaymentProjectType(val);
+                        setSelectedProjectId("");
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">عام / الكل</SelectItem>
+                        <SelectItem value="contracting">مقاولات</SelectItem>
+                        <SelectItem value="finishing">تشطيبات</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>المشروع المستهدف</Label>
+                    <Select
+                      value={selectedProjectId}
+                      onValueChange={setSelectedProjectId}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={paymentProjectType === "all" ? "اختر مشروعاً (اختياري)..." : "اختر المشروع..."} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">بدون مشروع (رصيد عام)</SelectItem>
+                        {filteredProjectsForPayment.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name} ({p.project_type === "contracting" ? "مقاولات" : "تشطيبات"})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -942,146 +1181,400 @@ export default function ClientDetail() {
         </div>
       </div>
 
-      {/* Financial Statistics Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="border-border">
+      {/* Financial Overview Row (3 Summary Cards) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="border-border bg-card/60">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">
-              قيمة الأعمال والمطالبات
+              إجمالي العقود المبرمة
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline justify-between">
-              <span className="text-2xl font-black text-foreground">
+              <span className="text-xl font-black text-foreground font-mono">
+                {totalContractsAmount.toLocaleString()} د.ل
+              </span>
+              <FileText className="h-5 w-5 text-primary" />
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-3 pt-2 border-t border-border/60">
+              إجمالي قيمة عقود الاتفاقيات المبرمة ({contracts?.length || 0} عقود)
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border bg-card/60">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">
+              إجمالي قيمة الأعمال والمطالبات
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-baseline justify-between">
+              <span className="text-xl font-black text-foreground font-mono">
                 {clientFinancials.totalBilled.toLocaleString()} د.ل
               </span>
               <Building className="h-5 w-5 text-primary" />
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              مجموع قيم البنود المنجزة والمصاريف والمشتريات
-            </p>
+            <div className="flex items-center gap-2 mt-3 pt-2 border-t border-border/60 text-[10px] text-muted-foreground">
+              <span className="truncate">مقاولات: <strong className="text-foreground font-mono">{clientFinancials.contractingBilled.toLocaleString()}</strong></span>
+              <span>•</span>
+              <span className="truncate">تشطيب: <strong className="text-foreground font-mono">{clientFinancials.finishingBilled.toLocaleString()}</strong></span>
+            </div>
           </CardContent>
         </Card>
 
-        <Card className="border-border">
+        <Card className="border-border bg-card/60">
           <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">
-              إجمالي المبالغ المسددة
+            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase flex items-center justify-between">
+              <span>إجمالي المبالغ المسددة</span>
+              <Badge variant="outline" className="text-[10px] text-green-600 bg-green-500/10 border-green-500/30 font-mono">
+                {paymentsSummary.count} دفعة
+              </Badge>
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline justify-between">
-              <span className="text-2xl font-black text-green-600 dark:text-green-400">
-                {clientFinancials.totalPaid.toLocaleString()} د.ل
+              <span className="text-xl font-black text-green-600 dark:text-green-400 font-mono">
+                {(paymentsSummary.totalPaid || 0).toLocaleString()} د.ل
               </span>
               <Wallet className="h-5 w-5 text-green-600" />
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              إجمالي الدفعات المقبوضة التي سددها العميل
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className={`border-border ${clientFinancials.remaining > 0 ? "bg-red-500/5 border-red-500/20" : "bg-green-500/5 border-green-500/20"}`}>
-          <CardHeader className="pb-2">
-            <CardTitle className={`text-xs font-semibold uppercase ${clientFinancials.remaining > 0 ? "text-red-700" : "text-green-700"}`}>
-              المتبقي بذمة العميل
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-baseline justify-between">
-              <span className={`text-2xl font-black ${clientFinancials.remaining > 0 ? "text-red-600" : "text-green-600"}`}>
-                {clientFinancials.remaining.toLocaleString()} د.ل
-              </span>
-              <Coins className={`h-5 w-5 ${clientFinancials.remaining > 0 ? "text-red-500" : "text-green-500"}`} />
+            <div className="flex items-center gap-1.5 mt-3 pt-2 border-t border-border/60 text-[10px] text-muted-foreground">
+              <span className="truncate">مقاولات: <strong className="text-foreground font-mono">{(paymentsSummary.contractingPaid || 0).toLocaleString()}</strong></span>
+              <span>•</span>
+              <span className="truncate">تشطيب: <strong className="text-foreground font-mono">{(paymentsSummary.finishingPaid || 0).toLocaleString()}</strong></span>
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              {clientFinancials.remaining > 0 ? "مستحقات معلقة بانتظار التحصيل المالي" : "الحساب متوازن أو دفع بالزيادة"}
-            </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Projects Table */}
-      <Card>
-        <CardHeader className="pb-3 flex flex-row items-center justify-between">
-          <CardTitle>مشاريع العميل وقيمها</CardTitle>
-          <Link to={`/projects/new?client_id=${client.id}`}>
-            <Button size="sm" className="h-8 text-xs cursor-pointer">
-              <Plus className="h-4 w-4 ml-1" />
-              مشروع جديد
-            </Button>
-          </Link>
-        </CardHeader>
-        <CardContent className="p-0">
-          {projects && projects.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-right">المشروع</TableHead>
-                  <TableHead className="text-right">نوع المشروع</TableHead>
-                  <TableHead className="text-right">الحالة</TableHead>
-                  <TableHead className="text-center">ميزانية المشروع</TableHead>
-                  <TableHead className="text-center">قيمة الأعمال المنجزة</TableHead>
-                  <TableHead className="text-left w-[100px]"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {projects.map((project) => {
-                  const billAmount = clientFinancials.projectBills[project.id] || 0;
-                  return (
-                    <TableRow key={project.id} className="hover:bg-muted/40 transition-colors">
-                      <TableCell className="font-semibold">{project.name}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">
-                          {project.project_type === "contracting" ? "مقاولات" : "تشطيبات"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={statusColors[project.status] || ""}>
-                          {statusLabels[project.status] || project.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {Number(project.budget) > 0 ? formatCurrencyLYD(project.budget) : "---"}
-                      </TableCell>
-                      <TableCell className="text-center font-bold text-foreground">
-                        {billAmount.toLocaleString()} د.ل
-                      </TableCell>
-                      <TableCell className="text-left">
-                        <Button variant="ghost" size="sm" asChild className="cursor-pointer">
-                          <Link to={`/projects/${project.id}/phases`}>
-                            <span>عرض التفاصيل</span>
-                            <ArrowUpRight className="h-4 w-4 mr-1" />
-                          </Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          ) : (
-            <div className="text-center py-12 text-muted-foreground">
-              <FolderOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>لا توجد مشاريع لهذا العميل</p>
+      {/* Debts Breakdown Row (Split into Contracting Debts Card & Finishing Debts Card) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Contracting Projects Debt Card */}
+        <Card className="border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Hammer className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                <span>ديون مشاريع المقاولات</span>
+              </span>
+              <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-700 bg-amber-500/10">
+                {clientFinancials.contractingCount || 0} مشاريع
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-baseline justify-between">
+              <span className="text-2xl font-black text-amber-700 dark:text-amber-300 font-mono">
+                {(clientFinancials.contractingRemaining || 0).toLocaleString()} د.ل
+              </span>
+              <Coins className="h-6 w-6 text-amber-600 dark:text-amber-400" />
             </div>
-          )}
-        </CardContent>
-      </Card>
+            <div className="flex items-center justify-between mt-3 pt-2 border-t border-amber-500/20 text-[11px] text-muted-foreground">
+              <span>مطالبات المقاولات: <strong className="text-foreground font-mono">{(clientFinancials.contractingBilled || 0).toLocaleString()} د.ل</strong></span>
+              <span>المسدد: <strong className="text-green-600 font-mono">{(clientFinancials.contractingPaid || 0).toLocaleString()} د.ل</strong></span>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Finishing Projects Debt Card */}
+        <Card className="border-blue-500/30 bg-blue-500/5 dark:bg-blue-500/10">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-bold text-blue-700 dark:text-blue-400 uppercase flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Paintbrush className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <span>ديون مشاريع التشطيبات</span>
+              </span>
+              <Badge variant="outline" className="text-[10px] border-blue-500/40 text-blue-700 bg-blue-500/10">
+                {clientFinancials.finishingCount || 0} مشاريع
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-baseline justify-between">
+              <span className="text-2xl font-black text-blue-700 dark:text-blue-300 font-mono">
+                {(clientFinancials.finishingRemaining || 0).toLocaleString()} د.ل
+              </span>
+              <Coins className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div className="flex items-center justify-between mt-3 pt-2 border-t border-blue-500/20 text-[11px] text-muted-foreground">
+              <span>مطالبات التشطيبات: <strong className="text-foreground font-mono">{(clientFinancials.finishingBilled || 0).toLocaleString()} د.ل</strong></span>
+              <span>المسدد: <strong className="text-green-600 font-mono">{(clientFinancials.finishingPaid || 0).toLocaleString()} د.ل</strong></span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Projects Section Split by Type */}
+      <Tabs defaultValue="all" dir="rtl" className="w-full">
+        <Card>
+          <CardHeader className="pb-3 flex flex-row items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-4 flex-wrap">
+              <CardTitle>مشاريع العميل وقيمها</CardTitle>
+              <TabsList className="bg-muted p-1">
+                <TabsTrigger value="all" className="gap-1.5 cursor-pointer text-xs">
+                  <FolderOpen className="h-4 w-4" />
+                  <span>جميع المشاريع ({projects?.length || 0})</span>
+                </TabsTrigger>
+                <TabsTrigger value="contracting" className="gap-1.5 cursor-pointer text-xs">
+                  <Hammer className="h-4 w-4 text-amber-500" />
+                  <span>مشاريع المقاولات ({clientFinancials.contractingCount})</span>
+                </TabsTrigger>
+                <TabsTrigger value="finishing" className="gap-1.5 cursor-pointer text-xs">
+                  <Paintbrush className="h-4 w-4 text-blue-500" />
+                  <span>مشاريع التشطيب ({clientFinancials.finishingCount})</span>
+                </TabsTrigger>
+              </TabsList>
+            </div>
+
+            <Button size="sm" asChild className="h-8 text-xs cursor-pointer">
+              <Link to="/projects/new">
+                <Plus className="h-4 w-4 ml-1" />
+                مشروع جديد
+              </Link>
+            </Button>
+          </CardHeader>
+          <CardContent className="p-0">
+            <TabsContent value="all" className="m-0">
+              {(() => {
+                const list = projects || [];
+                if (list.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <FolderOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>لا توجد مشاريع لهذا العميل</p>
+                    </div>
+                  );
+                }
+                return (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-right">المشروع</TableHead>
+                        <TableHead className="text-right">نوع المشروع</TableHead>
+                        <TableHead className="text-right">الحالة</TableHead>
+                        <TableHead className="text-center">ميزانية المشروع</TableHead>
+                        <TableHead className="text-center">قيمة الأعمال المنجزة</TableHead>
+                        <TableHead className="text-left w-[100px]"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {list.map((project) => {
+                        const billAmount = clientFinancials.projectBills[project.id] || 0;
+                        const isContracting = project.project_type === "contracting";
+                        return (
+                          <TableRow key={project.id} className="hover:bg-muted/40 transition-colors">
+                            <TableCell className="font-semibold">{project.name}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={
+                                  isContracting
+                                    ? "border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10"
+                                    : "border-blue-500/40 text-blue-600 dark:text-blue-400 bg-blue-500/10"
+                                }
+                              >
+                                {isContracting ? "مقاولات" : "تشطيبات"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge className={statusColors[project.status] || ""}>
+                                {statusLabels[project.status] || project.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-center font-mono">
+                              {Number(project.budget) > 0 ? formatCurrencyLYD(project.budget) : "---"}
+                            </TableCell>
+                            <TableCell className="text-center font-bold text-foreground font-mono">
+                              {billAmount.toLocaleString()} د.ل
+                            </TableCell>
+                            <TableCell className="text-left">
+                              <Button variant="ghost" size="sm" asChild className="cursor-pointer">
+                                <Link to={`/projects/${project.id}/phases`}>
+                                  <span>عرض التفاصيل</span>
+                                  <ArrowUpRight className="h-4 w-4 mr-1" />
+                                </Link>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                );
+              })()}
+            </TabsContent>
+
+            <TabsContent value="contracting" className="m-0">
+              <div className="px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-xs font-semibold flex items-center justify-between text-amber-900 dark:text-amber-200">
+                <span className="flex items-center gap-1.5">
+                  <Hammer className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  <span>إجمالي مطالبات أعمال المقاولات:</span>
+                </span>
+                <span className="text-sm font-bold font-mono">{clientFinancials.contractingBilled.toLocaleString()} د.ل</span>
+              </div>
+              {(() => {
+                const list = (projects || []).filter((p) => p.project_type === "contracting");
+                if (list.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Hammer className="h-12 w-12 mx-auto mb-4 opacity-50 text-amber-500" />
+                      <p>لا توجد مشاريع مقاولات لهذا العميل</p>
+                    </div>
+                  );
+                }
+                return (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-right">المشروع</TableHead>
+                        <TableHead className="text-right">الحالة</TableHead>
+                        <TableHead className="text-center">ميزانية المشروع</TableHead>
+                        <TableHead className="text-center">قيمة الأعمال المنجزة</TableHead>
+                        <TableHead className="text-left w-[100px]"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {list.map((project) => {
+                        const billAmount = clientFinancials.projectBills[project.id] || 0;
+                        return (
+                          <TableRow key={project.id} className="hover:bg-muted/40 transition-colors">
+                            <TableCell className="font-semibold">{project.name}</TableCell>
+                            <TableCell>
+                              <Badge className={statusColors[project.status] || ""}>
+                                {statusLabels[project.status] || project.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-center font-mono">
+                              {Number(project.budget) > 0 ? formatCurrencyLYD(project.budget) : "---"}
+                            </TableCell>
+                            <TableCell className="text-center font-bold text-foreground font-mono">
+                              {billAmount.toLocaleString()} د.ل
+                            </TableCell>
+                            <TableCell className="text-left">
+                              <Button variant="ghost" size="sm" asChild className="cursor-pointer">
+                                <Link to={`/projects/${project.id}/phases`}>
+                                  <span>عرض التفاصيل</span>
+                                  <ArrowUpRight className="h-4 w-4 mr-1" />
+                                </Link>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                );
+              })()}
+            </TabsContent>
+
+            <TabsContent value="finishing" className="m-0">
+              <div className="px-4 py-2.5 bg-blue-500/10 border-b border-blue-500/20 text-xs font-semibold flex items-center justify-between text-blue-900 dark:text-blue-200">
+                <span className="flex items-center gap-1.5">
+                  <Paintbrush className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  <span>إجمالي مطالبات أعمال التشطيبات:</span>
+                </span>
+                <span className="text-sm font-bold font-mono">{clientFinancials.finishingBilled.toLocaleString()} د.ل</span>
+              </div>
+              {(() => {
+                const list = (projects || []).filter((p) => p.project_type === "finishing");
+                if (list.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Paintbrush className="h-12 w-12 mx-auto mb-4 opacity-50 text-blue-500" />
+                      <p>لا توجد مشاريع تشطيب لهذا العميل</p>
+                    </div>
+                  );
+                }
+                return (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-right">المشروع</TableHead>
+                        <TableHead className="text-right">الحالة</TableHead>
+                        <TableHead className="text-center">ميزانية المشروع</TableHead>
+                        <TableHead className="text-center">قيمة الأعمال المنجزة</TableHead>
+                        <TableHead className="text-left w-[100px]"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {list.map((project) => {
+                        const billAmount = clientFinancials.projectBills[project.id] || 0;
+                        return (
+                          <TableRow key={project.id} className="hover:bg-muted/40 transition-colors">
+                            <TableCell className="font-semibold">{project.name}</TableCell>
+                            <TableCell>
+                              <Badge className={statusColors[project.status] || ""}>
+                                {statusLabels[project.status] || project.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-center font-mono">
+                              {Number(project.budget) > 0 ? formatCurrencyLYD(project.budget) : "---"}
+                            </TableCell>
+                            <TableCell className="text-center font-bold text-foreground font-mono">
+                              {billAmount.toLocaleString()} د.ل
+                            </TableCell>
+                            <TableCell className="text-left">
+                              <Button variant="ghost" size="sm" asChild className="cursor-pointer">
+                                <Link to={`/projects/${project.id}/phases`}>
+                                  <span>عرض التفاصيل</span>
+                                  <ArrowUpRight className="h-4 w-4 mr-1" />
+                                </Link>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                );
+              })()}
+            </TabsContent>
+          </CardContent>
+        </Card>
+      </Tabs>
 
       {/* Client Payments (تسديدات الزبون) Table */}
       <Card>
-        <CardHeader className="pb-3 flex flex-row items-center justify-between">
-          <CardTitle>كشف الدفعات والتسديدات المستلمة</CardTitle>
-          <Button
-            size="sm"
-            onClick={() => setPaymentDialogOpen(true)}
-            className="h-8 text-xs cursor-pointer bg-green-600 hover:bg-green-700 text-white font-bold"
-          >
-            <Plus className="h-4 w-4 ml-1" />
-            إضافة دفعة
-          </Button>
+        <CardHeader className="pb-3 flex flex-col gap-4">
+          <div className="flex flex-row items-center justify-between w-full">
+            <div className="flex items-center gap-2">
+              <Wallet className="h-5 w-5 text-green-600" />
+              <CardTitle>كشف الدفعات والتسديدات المستلمة</CardTitle>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => setPaymentDialogOpen(true)}
+              className="h-8 text-xs cursor-pointer bg-green-600 hover:bg-green-700 text-white font-bold"
+            >
+              <Plus className="h-4 w-4 ml-1" />
+              إضافة دفعة
+            </Button>
+          </div>
+
+          {/* Dedicated Payments Summary Bar Card */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 p-3.5 rounded-xl bg-green-500/5 border border-green-500/20 text-xs">
+            <div>
+              <span className="text-muted-foreground block text-[10px]">إجمالي المقبوضات المسددة</span>
+              <span className="font-black text-sm text-green-600 font-mono">{paymentsSummary.totalPaid.toLocaleString()} د.ل</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block text-[10px]">توزيع المقبوضات حسب نوع العمل</span>
+              <span className="font-semibold text-foreground font-mono">
+                مقاولات: {paymentsSummary.contractingPaid.toLocaleString()} | تشطيب: {paymentsSummary.finishingPaid.toLocaleString()}
+              </span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block text-[10px]">وسيلة الدفع كاش vs بنكي</span>
+              <span className="font-semibold text-foreground font-mono">
+                كاش: {paymentsSummary.cashPaid.toLocaleString()} | بنكي: {paymentsSummary.bankPaid.toLocaleString()}
+              </span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block text-[10px]">إجمالي عدد الدفعات</span>
+              <span className="font-bold text-foreground font-mono">{paymentsSummary.count} دفعة مستلمة</span>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           {payments && payments.length > 0 ? (
@@ -1090,6 +1583,7 @@ export default function ClientDetail() {
                 <TableRow>
                   <TableHead className="text-right w-[60px]">ر.م</TableHead>
                   <TableHead className="text-right">تاريخ السداد</TableHead>
+                  <TableHead className="text-right">المشروع</TableHead>
                   <TableHead className="text-center">قيمة الدفعة</TableHead>
                   <TableHead className="text-right">طريقة الدفع</TableHead>
                   <TableHead className="text-right">الخزينة / الحساب المستلم</TableHead>
@@ -1105,7 +1599,23 @@ export default function ClientDetail() {
                       <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
                       <span>{format(new Date(payment.date), "yyyy/MM/dd")}</span>
                     </TableCell>
-                    <TableCell className="text-center font-bold text-green-600 dark:text-green-400">
+                    <TableCell>
+                      {payment.projects ? (
+                        <Badge
+                          variant="outline"
+                          className={
+                            payment.projects.project_type === "contracting"
+                              ? "border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10"
+                              : "border-blue-500/40 text-blue-600 dark:text-blue-400 bg-blue-500/10"
+                          }
+                        >
+                          {payment.projects.name} ({payment.projects.project_type === "contracting" ? "مقاولات" : "تشطيب"})
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">رصيد عام للزبون</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center font-bold text-green-600 dark:text-green-400 font-mono">
                       {payment.amount.toLocaleString()} د.ل
                     </TableCell>
                     <TableCell>

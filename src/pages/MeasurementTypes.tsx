@@ -18,10 +18,10 @@ import {
   Ruler,
   X,
   Calculator,
+  CheckCircle2,
   Variable,
   Info,
   FlaskConical,
-  CheckCircle2,
   XCircle,
   CircleDot,
 } from "lucide-react";
@@ -751,7 +751,9 @@ const MeasurementTypes = () => {
                             </p>
                           ) : formulaAnalysis.status === "ok" ? (
                             <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">المعادلة صحيحة ✓</p>
+                              <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium flex items-center gap-1">
+                                <CheckCircle2 className="h-3.5 w-3.5 inline" /> المعادلة صحيحة
+                              </p>
                               <span className="font-bold text-lg text-emerald-700 dark:text-emerald-300" dir="ltr">
                                 = {formulaAnalysis.result.toFixed(4).replace(/\.?0+$/, "")}
                               </span>

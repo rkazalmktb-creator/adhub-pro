@@ -67,6 +67,7 @@ type ContractItem = {
   notes: string | null;
   order_index: number;
   project_item_id: string | null;
+  measurement_factor?: number | null;
 };
 
 export default function ProjectContracts() {
@@ -236,6 +237,7 @@ export default function ProjectContracts() {
         quantity: Number(it.quantity),
         unit_price: Number(it.unit_price),
         total_price: Number(it.total_price),
+        measurement_factor: it.measurement_factor !== null && it.measurement_factor !== undefined ? Number(it.measurement_factor) : 1,
       })),
       clauses: (clausesRes.data || []).map((c: any) => ({
         title: c.title,
@@ -332,7 +334,7 @@ export default function ProjectContracts() {
   const addContractItem = () => {
     setContractItems((prev) => [
       ...prev,
-      { id: `new-${Date.now()}`, name: "", quantity: 1, unit_price: 0, project_item_id: "", general_item_id: "" },
+      { id: `new-${Date.now()}`, name: "", quantity: 1, unit_price: 0, project_item_id: "", general_item_id: "", measurement_factor: 1 },
     ]);
   };
 
@@ -357,6 +359,7 @@ export default function ProjectContracts() {
             updated.name = pItem.name;
             updated.unit_price = Number(pItem.unit_price);
             updated.quantity = Number(pItem.quantity);
+            updated.measurement_factor = pItem.measurement_factor !== null && pItem.measurement_factor !== undefined ? Number(pItem.measurement_factor) : 1;
           }
         }
         return updated;
@@ -590,6 +593,7 @@ export default function ProjectContracts() {
                             <TableHeader>
                               <TableRow>
                                 <TableHead className="text-xs">البند</TableHead>
+                                <TableHead className="text-xs text-center">معامل التكعيب</TableHead>
                                 <TableHead className="text-xs text-left">سعر الفئة / الوحدة</TableHead>
                               </TableRow>
                             </TableHeader>
@@ -597,6 +601,9 @@ export default function ProjectContracts() {
                               {loadedContractItems.map((item) => (
                                 <TableRow key={item.id}>
                                   <TableCell className="text-sm font-medium">{item.name}</TableCell>
+                                  <TableCell className="text-sm text-center font-bold">
+                                    {item.measurement_factor !== undefined && item.measurement_factor !== null ? item.measurement_factor : 1}
+                                  </TableCell>
                                   <TableCell className="text-sm text-left font-semibold">
                                     {formatCurrencyLYD(Number(item.unit_price))}
                                   </TableCell>
@@ -861,13 +868,26 @@ export default function ProjectContracts() {
                           </div>
                         </div>
 
-                        <div className="md:col-span-3 space-y-1">
+                        <div className="md:col-span-2 space-y-1">
                           <Label className="text-xs">اسم البند</Label>
                           <Input
                             value={item.name}
                             onChange={(e) => updateContractItem(idx, { name: e.target.value })}
                             placeholder="اسم البند"
                             className="h-8 text-sm"
+                          />
+                        </div>
+
+                        <div className="md:col-span-1 space-y-1">
+                          <Label className="text-xs">معامل التكعيب</Label>
+                          <Input
+                            type="number"
+                            step="any"
+                            value={item.measurement_factor !== undefined && item.measurement_factor !== null ? item.measurement_factor : 1}
+                            onChange={(e) =>
+                              updateContractItem(idx, { measurement_factor: parseFloat(e.target.value) || 0 })
+                            }
+                            className="h-8 text-sm text-center"
                           />
                         </div>
 

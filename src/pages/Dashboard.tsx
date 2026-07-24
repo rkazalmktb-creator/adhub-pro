@@ -81,8 +81,8 @@ const Dashboard = () => {
         fetchSafety(supabase.from("treasuries").select("id, name, balance, is_active")),
         fetchSafety(supabase.from("purchases").select("id", { count: "exact", head: true }).eq("status", "due")),
         fetchSafety(supabase.from("equipment_rentals").select("id", { count: "exact", head: true }).eq("status", "active")),
-        fetchSafety(supabase.from("variation_orders").select("id, amount, status, title")),
-        fetchSafety(supabase.from("risk_register").select("id, risk_level, status")),
+        fetchSafety(supabase.from("variation_orders").select("id, variation_amount, status, title")),
+        fetchSafety(supabase.from("risk_register").select("id, priority, status")),
         fetchSafety(supabase.from("technicians").select("id", { count: "exact", head: true })),
         fetchSafety(supabase.from("engineers").select("id", { count: "exact", head: true })),
         fetchSafety(supabase.from("equipment").select("id", { count: "exact", head: true })),
@@ -189,7 +189,7 @@ const Dashboard = () => {
               <span className="text-xs font-semibold text-emerald-400">حالة المنظومة: مستقرة وجاهزة</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              {getGreeting()}، مدير النظام 👋
+              {getGreeting()}، مدير النظام
             </h1>
             <p className="text-neutral-300 text-sm max-w-xl">
               مرحباً بك في ركاز. لديك اليوم <span className="text-primary font-bold">{stats?.activeProjects || 0} مشاريع نشطة</span> تجري متابعتها، و إجمالي <span className="text-primary font-bold">{stats?.activeRentals || 0} معدات</span> في مواقع العمل.

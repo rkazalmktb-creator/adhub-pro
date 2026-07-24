@@ -90,7 +90,7 @@ const Inventory = () => {
       setShowMatForm(false);
       setEditingMatId(null);
       setMatForm(emptyMaterial);
-      toast({ title: "✅ تم حفظ المادة" });
+      toast({ title: "تم حفظ المادة بنجاح" });
     },
     onError: () => toast({ title: "خطأ في الحفظ", variant: "destructive" }),
   });
@@ -102,7 +102,7 @@ const Inventory = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["materials"] });
-      toast({ title: "✅ تم الحذف" });
+      toast({ title: "تم الحذف بنجاح" });
     },
   });
 
@@ -125,7 +125,7 @@ const Inventory = () => {
       qc.invalidateQueries({ queryKey: ["materials"] });
       setShowMovForm(false);
       setMovForm(emptyMovement);
-      toast({ title: "✅ تمت إضافة الحركة" });
+      toast({ title: "تمت إضافة الحركة بنجاح" });
     },
     onError: () => toast({ title: "خطأ في الحفظ", variant: "destructive" }),
   });
@@ -183,7 +183,11 @@ const Inventory = () => {
           <CardContent className="pt-5">
             <p className="text-xs text-muted-foreground mb-1">مواد أقل من الحد الأدنى</p>
             <p className={`text-2xl font-bold ${lowStockCount > 0 ? "text-red-600" : "text-green-600"}`}>{lowStockCount}</p>
-            {lowStockCount > 0 && <p className="text-xs text-red-500 mt-1">⚠️ تحتاج إعادة طلب</p>}
+            {lowStockCount > 0 && (
+              <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                <AlertTriangle className="h-3.5 w-3.5 inline" /> تحتاج إعادة طلب
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>

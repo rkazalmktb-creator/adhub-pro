@@ -33,7 +33,7 @@ const Auth = () => {
         .from("company_settings")
         .select("company_name, company_logo")
         .limit(1)
-        .single();
+        .maybeSingle();
       
       if (error) throw error;
       return data;

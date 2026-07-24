@@ -23,6 +23,7 @@ import {
   BarChart3,
   Edit,
   Printer,
+  Landmark,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -206,8 +207,16 @@ const AccountantDashboard = () => {
                   <p className={`text-xl font-bold ${(data?.netProfit || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
                     {formatCurrencyLYD(data?.netProfit || 0)}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {(data?.netProfit || 0) >= 0 ? "✅ وضع إيجابي" : "⚠️ يحتاج مراجعة"}
+                  <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                    {(data?.netProfit || 0) >= 0 ? (
+                      <span className="text-emerald-600 font-medium flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3 inline" /> وضع إيجابي
+                      </span>
+                    ) : (
+                      <span className="text-amber-500 font-medium flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3 inline" /> يحتاج مراجعة
+                      </span>
+                    )}
                   </p>
                 </div>
                 <div className="bg-primary/10 rounded-lg p-2">
@@ -294,7 +303,7 @@ const AccountantDashboard = () => {
               {(data?.overduePurchases?.length || 0) === 0 ? (
                 <div className="text-center py-6 text-muted-foreground">
                   <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
-                  <p className="text-sm">لا توجد فواتير مستحقة 🎉</p>
+                  <p className="text-sm font-medium">لا توجد فواتير مستحقة</p>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -355,8 +364,8 @@ const AccountantDashboard = () => {
               {(data?.treasuries || []).map((t: any) => (
                 <div key={t.id} className="flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50 cursor-pointer" onClick={() => navigate(`/treasuries/${t.id}`)}>
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-xs">
-                      {t.treasury_type === "bank" ? "🏦 بنك" : "💵 نقدي"}
+                    <Badge variant="outline" className="text-xs flex items-center gap-1">
+                      {t.treasury_type === "bank" ? <><Landmark className="h-3 w-3 text-blue-600 inline" /> بنك</> : <><Wallet className="h-3 w-3 text-emerald-600 inline" /> نقدي</>}
                     </Badge>
                     <span className="text-sm">{t.name}</span>
                   </div>

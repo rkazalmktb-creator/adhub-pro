@@ -75,6 +75,11 @@ interface Purchase {
   notes: string | null;
   purchase_type?: "material" | "labor" | "rental";
   title?: string | null;
+  project_item_id?: string | null;
+  project_items?: {
+    id: string;
+    name: string;
+  } | null;
   suppliers?: {
     id: string;
     name: string;
@@ -130,6 +135,7 @@ const ProjectPurchases = () => {
   const [paySelectedParentTreasuryId, setPaySelectedParentTreasuryId] = useState<string>("");
   const [formData, setFormData] = useState({
     supplier_id: "",
+    project_item_id: "",
     date: new Date().toISOString().split("T")[0],
     invoice_number: "",
     paid_amount: "",
@@ -143,6 +149,22 @@ const ProjectPurchases = () => {
   });
   const [selectedLaborType, setSelectedLaborType] = useState<"station" | "registered">("station");
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<string>("");
+  
+  // Fetch project items for linking purchases
+  const { data: projectItems = [] } = useQuery({
+    queryKey: ["project-items-for-purchases", projectId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("project_items")
+        .select("id, name, phase_id")
+        .eq("project_id", projectId!)
+        .order("name", { ascending: true });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!projectId,
+  });
+
   // Fetch project details
   const { data: project, isLoading: projectLoading } = useQuery({
     queryKey: ["project", projectId],
@@ -167,6 +189,7 @@ const ProjectPurchases = () => {
         .select(`
           *,
           suppliers (id, name),
+          project_items (id, name),
           treasuries (id, name, treasury_type),
           purchase_payments (id, amount, payment_method, notes)
         `)
@@ -283,6 +306,7 @@ const ProjectPurchases = () => {
       const payload = {
         project_id: projectId!,
         phase_id: phaseId || null,
+        project_item_id: data.project_item_id || null,
         supplier_id: isLabor ? null : (data.supplier_id || null),
         date: data.date,
         invoice_number: data.invoice_number || null,
@@ -373,7 +397,7 @@ const ProjectPurchases = () => {
   const payMutation = useMutation({
     mutationFn: async (data: typeof payFormData) => {
       if (!selectedPurchaseForPay) return;
-      const { error } = await supabase
+      const { data: insertedPay, error } = await supabase
         .from("purchase_payments")
         .insert({
           purchase_id: selectedPurchaseForPay.id,
@@ -383,14 +407,32 @@ const ProjectPurchases = () => {
           treasury_id: data.treasury_id,
           commission: parseFloat(data.commission) || 0,
           notes: data.notes || null,
-        });
+        })
+        .select("id")
+        .single();
       if (error) throw error;
+
+      if (data.treasury_id && insertedPay) {
+        const partyName = selectedPurchaseForPay.suppliers?.name || selectedPurchaseForPay.technicians?.name || selectedPurchaseForPay.title || "مشتريات";
+        await supabase.from("treasury_transactions").insert({
+          treasury_id: data.treasury_id,
+          type: "withdrawal",
+          amount: parseFloat(data.amount),
+          balance_after: 0,
+          description: `سداد مدفوعات: ${partyName}`,
+          date: data.date,
+          source: "purchase_payments",
+          reference_type: "purchase_payment",
+          reference_id: insertedPay.id,
+          notes: data.notes || null,
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-purchases", projectId] });
       queryClient.invalidateQueries({ queryKey: ["treasuries"] });
       queryClient.invalidateQueries({ queryKey: ["treasury_transactions"] });
-      toast({ title: "تم تسجيل الدفعة بنجاح ✨" });
+      toast({ title: "تم تسجيل الدفعة بنجاح" });
       setPayDialogOpen(false);
       setPayFormData({
         amount: "",
@@ -626,6 +668,7 @@ const ProjectPurchases = () => {
     const isLabor = pType === "labor";
     setFormData({
       supplier_id: purchase.supplier_id || "",
+      project_item_id: (purchase as any).project_item_id || "",
       date: purchase.date,
       invoice_number: purchase.invoice_number || "",
       paid_amount: String((purchase as any).paid_amount || 0),
@@ -1761,6 +1804,26 @@ const ProjectPurchases = () => {
               )}
             </div>
 
+            <div className="space-y-2">
+              <Label>بند المقاولة المرتبط (اختياري)</Label>
+              <Select
+                value={formData.project_item_id || "none"}
+                onValueChange={(val) => setFormData((prev) => ({ ...prev, project_item_id: val === "none" ? "" : val }))}
+              >
+                <SelectTrigger dir="rtl">
+                  <SelectValue placeholder="اختر بند المقاولة المرتبط بالفاتورة" />
+                </SelectTrigger>
+                <SelectContent dir="rtl">
+                  <SelectItem value="none">بدون ربط ببند مقاولة معين</SelectItem>
+                  {projectItems?.map((item: any) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {formData.purchase_type === "material" && (
               <div className="space-y-2">
                 <Label>طريقة إدخال الفاتورة</Label>
@@ -1954,8 +2017,8 @@ const ProjectPurchases = () => {
                     if (children.length === 0) return null;
                     return (
                       <SelectGroup key={parent.id}>
-                        <SelectLabel className="font-bold text-primary border-b border-border/40 pb-1 mb-1 mt-2 text-xs">
-                          💰 {parent.name}
+                        <SelectLabel className="font-bold text-primary border-b border-border/40 pb-1 mb-1 mt-2 text-xs flex items-center gap-1">
+                          <Wallet className="h-3.5 w-3.5 text-primary inline" /> {parent.name}
                         </SelectLabel>
                         {children.map((child) => (
                           <SelectItem key={child.id} value={child.id} className="pr-6">

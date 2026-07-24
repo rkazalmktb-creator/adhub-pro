@@ -40,6 +40,7 @@ interface ContractPrintData {
     quantity: number;
     unit_price: number;
     total_price: number;
+    measurement_factor?: number;
   }>;
   clauses: Array<{
     title: string;
@@ -112,7 +113,8 @@ export function printContract(data: ContractPrintData) {
       (item, idx) => `
       <tr>
         <td class="cell-center">${idx + 1}</td>
-        <td class="cell-name">${item.name}</td>
+        <td class="cell-name cell-center">${item.name}</td>
+        <td class="cell-center font-bold">${item.measurement_factor !== undefined ? item.measurement_factor : 1}</td>
         <td class="cell-center cell-bold">${formatCurrencyLYD(Number(item.unit_price))}</td>
       </tr>`
     )
@@ -466,7 +468,8 @@ export function printContract(data: ContractPrintData) {
           <tr>
             <th style="width:10%">${pl.col_number}</th>
             <th>${pl.col_item}</th>
-            <th style="width:30%">${pl.col_unit_price}</th>
+            <th style="width:20%">معامل التكعيب</th>
+            <th style="width:25%">${pl.col_unit_price}</th>
           </tr>
         </thead>
         <tbody>
@@ -485,25 +488,51 @@ export function printContract(data: ContractPrintData) {
     </div>
   ` : "";
 
+  const signeeName = settings?.signee_name || "";
+  const signeeTitle = settings?.signee_title || "الممثل القانوني للشركة";
+
   // First party is ALWAYS the company, second party is ALWAYS the client
   const signaturesHtml = cs.contract_show_signatures ? `
     <div class="signatures-section">
       <div class="section-header">
         <div class="section-header-text">${pl.signatures_section}</div>
       </div>
-      <div class="signatures-grid">
-        <div class="signature-box">
-          <div class="sig-header">الطرف الأول (الشركة)</div>
-          <div class="sig-body">
-            <div class="sig-name">${companyName || "_______________"}</div>
-            <div class="sig-line">التوقيع والختم</div>
+      <div class="signatures-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 16px;">
+        <div class="signature-box" style="border: 1px solid var(--c-accent); border-radius: 8px; background: #ffffff; display: flex; flex-direction: column; height: 165px; overflow: hidden;">
+          <div class="sig-header" style="background: #fdfaf2; color: #8c6e26; border-bottom: 1px solid var(--c-accent); padding: 8px 12px; font-weight: bold; font-size: 10pt; text-align: center;">
+            الطرف الأول (الشركة)
+          </div>
+          <div class="sig-body" style="padding: 12px; flex: 1; display: flex; flex-direction: column; justify-content: space-between; text-align: center;">
+            <div>
+              <div style="font-size: 11pt; font-weight: bold; color: #000; margin-bottom: 4px;">${companyName}</div>
+              ${signeeName ? `
+              <div style="font-size: 9.5pt; color: #555; font-weight: bold;">
+                عنها الممثل: ${signeeName} (${signeeTitle})
+              </div>
+              ` : `
+              <div style="font-size: 9.5pt; color: transparent; select: none;">-</div>
+              `}
+            </div>
+            <div>
+              <div style="border-top: 1px dashed var(--c-accent); margin: 0 auto 6px auto; width: 85%;"></div>
+              <div style="font-size: 9pt; color: #666; font-weight: bold;">التوقيع والختم</div>
+            </div>
           </div>
         </div>
-        <div class="signature-box">
-          <div class="sig-header">الطرف الثاني (العميل)</div>
-          <div class="sig-body">
-            <div class="sig-name">${clientName || "_______________"}</div>
-            <div class="sig-line">التوقيع والختم</div>
+
+        <div class="signature-box" style="border: 1px solid var(--c-accent); border-radius: 8px; background: #ffffff; display: flex; flex-direction: column; height: 165px; overflow: hidden;">
+          <div class="sig-header" style="background: #fdfaf2; color: #8c6e26; border-bottom: 1px solid var(--c-accent); padding: 8px 12px; font-weight: bold; font-size: 10pt; text-align: center;">
+            الطرف الثاني (العميل)
+          </div>
+          <div class="sig-body" style="padding: 12px; flex: 1; display: flex; flex-direction: column; justify-content: space-between; text-align: center;">
+            <div>
+              <div style="font-size: 11pt; font-weight: bold; color: #000; margin-bottom: 4px;">${clientName || "_______________"}</div>
+              <div style="font-size: 9.5pt; color: transparent; select: none;">-</div>
+            </div>
+            <div>
+              <div style="border-top: 1px dashed var(--c-accent); margin: 0 auto 6px auto; width: 85%;"></div>
+              <div style="font-size: 9pt; color: #666; font-weight: bold;">التوقيع والختم</div>
+            </div>
           </div>
         </div>
       </div>

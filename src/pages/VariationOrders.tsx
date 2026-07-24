@@ -121,7 +121,7 @@ const VariationOrders = () => {
       setShowForm(false);
       setEditingId(null);
       setForm({ ...emptyForm, project_id: projectFromUrl });
-      toast({ title: "✅ تم حفظ أمر التغيير" });
+      toast({ title: "تم حفظ أمر التغيير بنجاح" });
     },
     onError: () => toast({ title: "خطأ في الحفظ", variant: "destructive" }),
   });
@@ -133,7 +133,7 @@ const VariationOrders = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["variation-orders"] });
-      toast({ title: "✅ تم الحذف" });
+      toast({ title: "تم الحذف بنجاح" });
     },
   });
 

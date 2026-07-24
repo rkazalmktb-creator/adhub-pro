@@ -34,8 +34,8 @@ const STATUS_CONFIG: Record<string, { label: string; icon: any; color: string }>
 
 const ITEM_STATUSES = [
   { value: "pending", label: "معلق", icon: Clock, color: "text-muted-foreground" },
-  { value: "pass", label: "اجتاز ✓", icon: CheckCircle2, color: "text-green-600" },
-  { value: "fail", label: "فشل ✗", icon: XCircle, color: "text-red-600" },
+  { value: "pass", label: "اجتاز", icon: CheckCircle2, color: "text-green-600" },
+  { value: "fail", label: "لم يجتز", icon: XCircle, color: "text-red-600" },
   { value: "na", label: "لا ينطبق", icon: Circle, color: "text-muted-foreground" },
 ];
 
@@ -131,7 +131,7 @@ const QualityControl = () => {
       setShowForm(false);
       setEditingId(null);
       setForm({ ...emptyChecklist, project_id: projectFromUrl });
-      toast({ title: "✅ تم حفظ قائمة الفحص" });
+      toast({ title: "تم حفظ قائمة الفحص بنجاح" });
     },
     onError: () => toast({ title: "خطأ في الحفظ", variant: "destructive" }),
   });
@@ -143,7 +143,7 @@ const QualityControl = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["inspection-checklists"] });
-      toast({ title: "✅ تم الحذف" });
+      toast({ title: "تم الحذف بنجاح" });
     },
   });
 

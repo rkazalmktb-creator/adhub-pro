@@ -125,12 +125,22 @@ export default function Clients() {
     },
   });
 
+  const { data: contracts } = useQuery({
+    queryKey: ["all-contracts-clients-page"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("contracts").select("id, client_id, project_id, amount, status");
+      if (error) throw error;
+      return data;
+    },
+  });
+
   // Map clients to their calculated financial overview
   const clientsWithFinancials = useMemo(() => {
     if (!clients || !projects || !phases || !projectItems || !purchases || !clientPayments) return [];
 
     return clients.map((client) => {
       const clientProjList = projects.filter((p) => p.client_id === client.id) || [];
+      const clientContracts = (contracts || []).filter(c => c.client_id === client.id && c.status !== "cancelled");
       
       let totalBilled = 0;
 
@@ -142,6 +152,9 @@ export default function Clients() {
         const itemsSum = projItems.reduce((sum, item) => sum + Number(item.total_price || 0), 0);
         const purchSum = projPurchases.reduce((sum, p) => sum + Number(p.total_amount || 0), 0);
         const rentSum = projRentals.reduce((sum, r) => sum + Number(r.total_amount || 0), 0);
+
+        const projContracts = clientContracts.filter(c => c.project_id === proj.id || (!c.project_id && proj.project_type === "contracting"));
+        const contractsSum = projContracts.reduce((sum, c) => sum + Number(c.amount || 0), 0);
 
         let percentageFeeSum = 0;
         const allProjPurchasesAndRentals = purchases.filter((p) => p.project_id === proj.id);
@@ -166,7 +179,10 @@ export default function Clients() {
           }
         });
 
-        totalBilled += itemsSum + purchSum + rentSum + percentageFeeSum;
+        const budgetVal = Number(proj.budget || 0);
+        const projectBaseValue = Math.max(itemsSum, contractsSum, budgetVal);
+
+        totalBilled += projectBaseValue + purchSum + rentSum + percentageFeeSum;
       });
 
       const clientPaymentsList = clientPayments.filter((cp) => cp.client_id === client.id);
@@ -182,7 +198,7 @@ export default function Clients() {
         remaining,
       };
     });
-  }, [clients, projects, phases, projectItems, purchases, clientPayments]);
+  }, [clients, projects, phases, projectItems, purchases, clientPayments, contracts]);
 
   // Filter clients by search query
   const filteredClients = useMemo(() => {
@@ -766,8 +782,9 @@ export default function Clients() {
                   <li>جميع المصاريف التشغيلية والمشتريات وإيجار المعدات المسجلة بالمراحل.</li>
                   <li>جميع إيصالات مقبوضات الدفعات والقيود المالية.</li>
                 </ul>
-                <p className="mt-2 font-bold text-red-600 dark:text-red-400">
-                  ⚠️ هذه العملية خطيرة جداً ولا يمكن التراجع عنها أبداً!
+                <p className="mt-2 font-bold text-red-600 dark:text-red-400 flex items-center justify-center gap-1.5">
+                  <AlertTriangle className="h-4 w-4 inline text-red-600" />
+                  <span>هذه العملية خطيرة جداً ولا يمكن التراجع عنها أبداً!</span>
                 </p>
               </div>
 
@@ -799,7 +816,10 @@ export default function Clients() {
           ) : (
             <div className="space-y-4">
               <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-lg text-sm text-red-700 dark:text-red-400 leading-relaxed font-semibold">
-                <p className="text-center text-base mb-2 font-bold">⚠️ خطوة التأكيد النهائية ⚠️</p>
+                <p className="text-center text-base mb-2 font-bold flex items-center justify-center gap-1.5 text-red-600">
+                  <AlertTriangle className="h-5 w-5 inline text-red-600" />
+                  <span>خطوة التأكيد النهائية</span>
+                </p>
                 <p className="text-center">
                   أنت على وشك حذف العميل بشكل قطعي. هل قمت بنسخ بيانات العميل احتياطياً وتأكيد رغبتك بالمسح؟
                 </p>

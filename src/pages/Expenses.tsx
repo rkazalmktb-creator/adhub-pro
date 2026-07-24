@@ -139,11 +139,28 @@ export default function Expenses() {
   // Expense mutations
   const createExpenseMutation = useMutation({
     mutationFn: async (data: ExpenseInsert) => {
-      const { error } = await supabase.from("expenses").insert(data);
+      const { data: insertedExp, error } = await supabase.from("expenses").insert(data).select("id").single();
       if (error) throw error;
+
+      if (data.treasury_id && insertedExp) {
+        await supabase.from("treasury_transactions").insert({
+          treasury_id: data.treasury_id,
+          type: "withdrawal",
+          amount: Number(data.amount),
+          balance_after: 0,
+          description: `مصروف: ${data.description}`,
+          date: data.date,
+          source: "expense",
+          reference_type: "expense",
+          reference_id: insertedExp.id,
+          notes: data.notes || null,
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["expenses"] });
+      queryClient.invalidateQueries({ queryKey: ["treasuries"] });
+      queryClient.invalidateQueries({ queryKey: ["treasury_transactions"] });
       toast({ title: "تم الإضافة", description: "تم إضافة المصروف بنجاح" });
       setExpenseDialogOpen(false);
     },
@@ -419,7 +436,31 @@ export default function Expenses() {
           <TableBody>
             {purchases.map((p) => (
               <TableRow key={p.id}>
-                <TableCell>{(p as any).suppliers?.name ?? "-"}</TableCell>
+                <TableCell className="font-medium">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {(p as any).suppliers?.name ? (
+                        <span className="font-semibold">{(p as any).suppliers.name}</span>
+                      ) : (p as any).title ? (
+                        <span className="font-semibold">{(p as any).title}</span>
+                      ) : (p as any).notes ? (
+                        <span className="font-semibold">{(p as any).notes}</span>
+                      ) : (
+                        <span className="text-muted-foreground italic">مورد غير محدد</span>
+                      )}
+                      {!(p as any).suppliers?.name && (
+                        <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4 bg-muted/50 text-muted-foreground border-muted-foreground/30 font-normal">
+                          بدون مورد
+                        </Badge>
+                      )}
+                    </div>
+                    {(p as any).suppliers?.name && ((p as any).title || (p as any).notes) && (
+                      <p className="text-xs text-muted-foreground truncate max-w-[200px]">
+                        {(p as any).title || (p as any).notes}
+                      </p>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell>{(p as any).projects?.name ?? "-"}</TableCell>
                 <TableCell>{formatCurrencyLYD(Number(p.total_amount))}</TableCell>
                 <TableCell>{p.date}</TableCell>
@@ -577,7 +618,7 @@ export default function Expenses() {
                     const children = allTreasuries.filter(c => (c as any).parent_id === parent.id);
                     if (children.length === 0) return null;
                     return (
-                      <optgroup key={parent.id} label={`💰 ${parent.name}`}>
+                      <optgroup key={parent.id} label={parent.name}>
                         {children.map((child) => (
                           <option key={child.id} value={child.id}>
                             {child.name} (الرصيد: {formatCurrencyLYD(child.balance || 0)})

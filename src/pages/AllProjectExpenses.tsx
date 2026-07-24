@@ -125,6 +125,7 @@ const AllProjectExpenses = () => {
 
   // Form state for purchase
   const [purchaseForm, setPurchaseForm] = useState({
+    title: "",
     supplier_id: "",
     project_id: "",
     total_amount: 0,
@@ -270,6 +271,7 @@ const AllProjectExpenses = () => {
   const openEditPurchase = (p: any) => {
     setEditingPurchase(p);
     setPurchaseForm({
+      title: p.title || "",
       supplier_id: p.supplier_id || "",
       project_id: p.project_id || "",
       total_amount: Number(p.total_amount),
@@ -286,6 +288,7 @@ const AllProjectExpenses = () => {
   const openAddPurchase = () => {
     setEditingPurchase(null);
     setPurchaseForm({
+      title: "",
       supplier_id: "",
       project_id: "",
       total_amount: 0,
@@ -342,7 +345,9 @@ const AllProjectExpenses = () => {
     const matchSearch = searchQuery
       ? (p.suppliers?.name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
         (p.projects?.name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (p.invoice_number || "").toLowerCase().includes(searchQuery.toLowerCase())
+        (p.invoice_number || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (p.title || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (p.notes || "").toLowerCase().includes(searchQuery.toLowerCase())
       : true;
     const matchProject = projectFilter === "all" || p.project_id === projectFilter;
     const matchStatus = typeFilter === "all" || p.status === typeFilter;
@@ -530,7 +535,37 @@ const AllProjectExpenses = () => {
                     const st = statusLabels[p.status] || { label: p.status, variant: "outline" as const };
                     return (
                       <TableRow key={p.id}>
-                        <TableCell className="font-medium">{p.suppliers?.name || "—"}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {p.suppliers?.name ? (
+                                <span className="font-semibold text-foreground">{p.suppliers.name}</span>
+                              ) : p.title ? (
+                                <span className="font-semibold text-foreground">{p.title}</span>
+                              ) : p.notes ? (
+                                <span className="font-semibold text-foreground">{p.notes}</span>
+                              ) : (
+                                <span className="text-muted-foreground italic">مورد غير محدد</span>
+                              )}
+                              {!p.suppliers?.name && (
+                                <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4 bg-muted/50 text-muted-foreground border-muted-foreground/30 font-normal">
+                                  بدون مورد
+                                </Badge>
+                              )}
+                            </div>
+                            {/* Subtitle description */}
+                            {p.suppliers?.name && (p.title || p.notes) && (
+                              <p className="text-xs text-muted-foreground truncate max-w-[220px]" title={p.title || p.notes}>
+                                {p.title || p.notes}
+                              </p>
+                            )}
+                            {!p.suppliers?.name && p.title && p.notes && p.title !== p.notes && (
+                              <p className="text-xs text-muted-foreground truncate max-w-[220px]" title={p.notes}>
+                                {p.notes}
+                              </p>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell>
                           {p.projects?.name ? (
                             <button
@@ -666,6 +701,14 @@ const AllProjectExpenses = () => {
             <DialogDescription>أدخل بيانات الفاتورة</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2 max-h-[65vh] overflow-y-auto">
+            <div className="space-y-1.5">
+              <Label>البيان / عنوان الفاتورة</Label>
+              <Input
+                value={purchaseForm.title}
+                onChange={(e) => setPurchaseForm(f => ({ ...f, title: e.target.value }))}
+                placeholder="مثال: فاتورة مواد سباكة لزوم تأسيس السقف"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>المورد</Label>
@@ -736,6 +779,7 @@ const AllProjectExpenses = () => {
             <Button
               onClick={() => {
                 const payload: any = {
+                  title: purchaseForm.title || null,
                   supplier_id: purchaseForm.supplier_id && purchaseForm.supplier_id !== "none" ? purchaseForm.supplier_id : null,
                   project_id: purchaseForm.project_id && purchaseForm.project_id !== "none" ? purchaseForm.project_id : null,
                   total_amount: purchaseForm.total_amount,

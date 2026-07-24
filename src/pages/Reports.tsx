@@ -23,6 +23,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
+  Building2,
 } from "lucide-react";
 
 const Reports = () => {
@@ -31,7 +32,7 @@ const Reports = () => {
   const { data: settings } = useQuery({
     queryKey: ["company-settings"],
     queryFn: async () => {
-      const { data } = await supabase.from("company_settings").select("*").limit(1).single();
+      const { data } = await supabase.from("company_settings").select("*").limit(1).maybeSingle();
       return data;
     },
   });
@@ -221,7 +222,10 @@ const Reports = () => {
         <>
           {/* Financial Stats */}
           <div>
-            <h2 className="text-lg font-semibold mb-3 text-muted-foreground">📊 الملخص المالي</h2>
+            <h2 className="text-lg font-semibold mb-3 text-muted-foreground flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-primary" />
+              الملخص المالي
+            </h2>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <StatBox title="إجمالي الإيرادات" value={formatCurrencyLYD(reportData?.totalIncome || 0)} icon={TrendingUp} color="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" />
               <StatBox title="إجمالي المصروفات" value={formatCurrencyLYD(reportData?.totalExpenses || 0)} icon={TrendingDown} color="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" />
@@ -237,7 +241,10 @@ const Reports = () => {
 
           {/* Projects & Operations */}
           <div>
-            <h2 className="text-lg font-semibold mb-3 text-muted-foreground">🏗️ المشاريع والعمليات</h2>
+            <h2 className="text-lg font-semibold mb-3 text-muted-foreground flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-primary" />
+              المشاريع والعمليات
+            </h2>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <StatBox title="المشاريع النشطة" value={String(reportData?.activeProjects || 0)} icon={FolderKanban} color="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" />
               <StatBox title="المشاريع المكتملة" value={String(reportData?.completedProjects || 0)} icon={CheckCircle2} color="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" />
@@ -248,7 +255,10 @@ const Reports = () => {
 
           {/* People & Treasury */}
           <div>
-            <h2 className="text-lg font-semibold mb-3 text-muted-foreground">👥 الأشخاص والخزائن</h2>
+            <h2 className="text-lg font-semibold mb-3 text-muted-foreground flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              الأشخاص والخزائن
+            </h2>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <StatBox title="إجمالي العملاء" value={String(reportData?.totalClients || 0)} icon={Users} color="bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400" />
               <StatBox title="الموردون" value={String(reportData?.totalSuppliers || 0)} icon={FileSpreadsheet} color="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400" />

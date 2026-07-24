@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,11 +25,24 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Pencil, Trash2, Wallet, Save, X, Landmark, FolderOpen, ArrowLeftRight, Banknote, Calendar, ShieldAlert, CreditCard } from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { 
+  Plus, Pencil, Trash2, Wallet, Save, X, Landmark, FolderOpen, 
+  ArrowLeftRight, Banknote, Calendar, ShieldAlert, CreditCard,
+  TrendingUp, TrendingDown, ArrowDownLeft, ArrowUpRight, Search, Printer, FileText, CheckCircle2
+} from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/hooks/use-toast";
 import { formatCurrencyLYD } from "@/lib/currency";
 import { useNavigate } from "react-router-dom";
+import { openReceiptPrintWindow } from "@/lib/printStyles";
 
 interface Treasury {
   id: string;
@@ -54,6 +67,12 @@ const Treasuries = () => {
   const [dialogMode, setDialogMode] = useState<"parent" | "child">("parent");
   const [selectedParentId, setSelectedParentId] = useState<string | null>(null);
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"accounts" | "transactions" | "loans">("accounts");
+  
+  // Transaction filter states
+  const [txSearchQuery, setTxSearchQuery] = useState("");
+  const [txTypeFilter, setTxTypeFilter] = useState<string>("all");
+
   const [transferForm, setTransferForm] = useState({
     fromTreasuryId: "",
     toTreasuryId: "",
@@ -61,6 +80,7 @@ const Treasuries = () => {
     reason: "",
     date: new Date().toISOString().split("T")[0],
   });
+
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -84,6 +104,19 @@ const Treasuries = () => {
     },
   });
 
+  // Fetch company settings for printing
+  const { data: companySettings } = useQuery({
+    queryKey: ["company-settings"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("company_settings")
+        .select("*")
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
   // Fetch transfers (loans & custodies)
   const { data: transfers, isLoading: isLoadingTransfers } = useQuery({
     queryKey: ["transfers"],
@@ -97,24 +130,107 @@ const Treasuries = () => {
     },
   });
 
-  const [activeTab, setActiveTab] = useState<"accounts" | "loans">("accounts");
+  // Fetch client payments sum
+  const { data: clientPayments = [] } = useQuery({
+    queryKey: ["all-client-payments-treasury-page"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("client_payments")
+        .select("id, amount, date, payment_method, notes, client_id, treasury_id, clients(name)");
+      if (error) throw error;
+      return data || [];
+    },
+  });
 
-  const isLoading = isLoadingTreasuries || isLoadingTransfers;
+  // Fetch purchase payments sum (suppliers & technicians)
+  const { data: purchasePayments = [] } = useQuery({
+    queryKey: ["all-purchase-payments-treasury-page"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("purchase_payments")
+        .select("id, amount, date, payment_method, notes, treasury_id, purchases(title, supplier_id, technician_id, suppliers(name), technicians(name))");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Fetch expenses sum
+  const { data: expenses = [] } = useQuery({
+    queryKey: ["all-expenses-treasury-page"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("expenses")
+        .select("id, amount, date, description, treasury_id");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Fetch all treasury transactions
+  const { data: allTransactions = [], isLoading: isLoadingTx } = useQuery({
+    queryKey: ["treasury_transactions", "all"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("treasury_transactions")
+        .select("*, treasuries(name, treasury_type)")
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const isLoading = isLoadingTreasuries || isLoadingTransfers || isLoadingTx;
 
   // Group: parents and children
   const parentTreasuries = treasuries?.filter(t => !t.parent_id) || [];
   const childTreasuries = treasuries?.filter(t => t.parent_id) || [];
   const getChildren = (parentId: string) => treasuries?.filter(t => t.parent_id === parentId) || [];
 
-  // Stats
+  // Aggregated Stats
   const totalCashBalance = childTreasuries.filter(t => t.treasury_type === "cash" && t.is_active).reduce((sum, t) => sum + t.balance, 0);
   const totalBankBalance = childTreasuries.filter(t => t.treasury_type === "bank" && t.is_active).reduce((sum, t) => sum + t.balance, 0);
   
+  const totalClientPaymentsSum = clientPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const totalPurchasePaymentsSum = purchasePayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const totalExpensesSum = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
   const activeLoans = transfers?.filter(t => t.type === "loan" && t.status === "active") || [];
   const totalActiveLoans = activeLoans.reduce((sum, t) => sum + Number(t.amount), 0);
 
   const activeAdvances = transfers?.filter(t => t.type === "advance" && t.status === "active") || [];
   const totalActiveAdvances = activeAdvances.reduce((sum, t) => sum + Number(t.amount), 0);
+
+  // Filtered Transactions
+  const filteredTransactions = useMemo(() => {
+    return allTransactions.filter(tx => {
+      const matchesType = txTypeFilter === "all" 
+        ? true 
+        : txTypeFilter === "deposit"
+          ? tx.type === "deposit"
+          : txTypeFilter === "withdrawal"
+            ? tx.type === "withdrawal"
+            : txTypeFilter === "client_payment"
+              ? tx.source === "client_payment" || tx.reference_type === "client_payment"
+              : txTypeFilter === "purchase_payments"
+                ? tx.source === "purchase_payments" || tx.reference_type === "purchase_payment"
+                : txTypeFilter === "expense"
+                  ? tx.source === "expense" || tx.reference_type === "expense"
+                  : txTypeFilter === "transfer"
+                    ? tx.source === "transfer" || tx.reference_type === "transfer"
+                    : true;
+
+      const q = txSearchQuery.trim().toLowerCase();
+      const matchesSearch = !q || (
+        (tx.description && tx.description.toLowerCase().includes(q)) ||
+        (tx.notes && tx.notes.toLowerCase().includes(q)) ||
+        (tx.treasuries?.name && tx.treasuries.name.toLowerCase().includes(q)) ||
+        (tx.amount && tx.amount.toString().includes(q))
+      );
+
+      return matchesType && matchesSearch;
+    });
+  }, [allTransactions, txTypeFilter, txSearchQuery]);
 
   const saveMutation = useMutation({
     mutationFn: async (data: typeof formData & { parent_id?: string | null }) => {
@@ -228,7 +344,7 @@ const Treasuries = () => {
   const handleAddParent = () => {
     setDialogMode("parent");
     setSelectedParentId(null);
-    setFormData({ ...formData, treasury_type: "cash" });
+    setFormData({ name: "", description: "", is_active: true, notes: "", treasury_type: "cash", bank_name: "", account_number: "" });
     setDialogOpen(true);
   };
 
@@ -266,6 +382,25 @@ const Treasuries = () => {
     });
   };
 
+  const handlePrintReceipt = (tx: any) => {
+    const type = tx.source === "transfer" 
+      ? "transfer" 
+      : tx.type === "deposit" 
+        ? "deposit" 
+        : "withdrawal";
+        
+    openReceiptPrintWindow({
+      receiptNumber: `TX-${tx.id.slice(0, 8)}`,
+      date: tx.date,
+      type: type,
+      amount: Number(tx.amount || 0),
+      paidToOrBy: tx.type === "deposit" ? "المودع / العميل" : "المستلم / المستفيد",
+      description: tx.description || "حركة خزينة",
+      treasuryName: tx.treasuries?.name || undefined,
+      notes: tx.notes || undefined,
+    }, companySettings);
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -284,7 +419,7 @@ const Treasuries = () => {
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">إدارة الحسابات والخزائن</h1>
-            <p className="text-sm text-muted-foreground">مراقبة السيولة النقدية، الحسابات المصرفية، السلف، والتحويلات</p>
+            <p className="text-sm text-muted-foreground">مراقبة السيولة النقدية، مقبوضات الزبائن، مدفوعات الموردين والفنيين، المصروفات والتحويلات</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -299,72 +434,104 @@ const Treasuries = () => {
         </div>
       </div>
 
-      {/* Summary Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Summary Cards Grid (6 Cards) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
         {/* Card 1: Cash */}
         <Card className="border border-border/40 bg-gradient-to-br from-amber-500/[0.03] to-transparent hover:border-amber-500/20 transition-all duration-300 rounded-2xl overflow-hidden shadow-sm">
-          <CardContent className="p-5 flex items-center justify-between">
-            <div className="space-y-1.5">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">السيولة النقدية (كاش)</span>
-              <p className="text-2xl font-bold tracking-tight text-amber-700 dark:text-amber-400">{formatCurrencyLYD(totalCashBalance)}</p>
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">السيولة (كاش)</span>
+              <p className="text-xl font-bold tracking-tight text-amber-700 dark:text-amber-400">{formatCurrencyLYD(totalCashBalance)}</p>
             </div>
-            <div className="p-3 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
-              <Wallet className="h-6 w-6" />
+            <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              <Wallet className="h-5 w-5" />
             </div>
           </CardContent>
         </Card>
 
         {/* Card 2: Bank */}
         <Card className="border border-border/40 bg-gradient-to-br from-blue-500/[0.03] to-transparent hover:border-blue-500/20 transition-all duration-300 rounded-2xl overflow-hidden shadow-sm">
-          <CardContent className="p-5 flex items-center justify-between">
-            <div className="space-y-1.5">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">الحسابات المصرفية</span>
-              <p className="text-2xl font-bold tracking-tight text-blue-700 dark:text-blue-400">{formatCurrencyLYD(totalBankBalance)}</p>
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">الحسابات المصرفية</span>
+              <p className="text-xl font-bold tracking-tight text-blue-700 dark:text-blue-400">{formatCurrencyLYD(totalBankBalance)}</p>
             </div>
-            <div className="p-3 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
-              <Landmark className="h-6 w-6" />
+            <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+              <Landmark className="h-5 w-5" />
             </div>
           </CardContent>
         </Card>
 
-        {/* Card 3: Loans */}
+        {/* Card 3: Client Payments */}
+        <Card 
+          onClick={() => navigate("/client-payments")}
+          className="border border-border/40 bg-gradient-to-br from-emerald-500/[0.03] to-transparent hover:border-emerald-500/20 cursor-pointer transition-all duration-300 rounded-2xl overflow-hidden shadow-sm hover:shadow-md"
+        >
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">مقبوضات الزبائن</span>
+              <p className="text-xl font-bold tracking-tight text-emerald-700 dark:text-emerald-400">{formatCurrencyLYD(totalClientPaymentsSum)}</p>
+            </div>
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <ArrowDownLeft className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Card 4: Supplier & Tech Payments */}
+        <Card 
+          onClick={() => setActiveTab("transactions")}
+          className="border border-border/40 bg-gradient-to-br from-indigo-500/[0.03] to-transparent hover:border-indigo-500/20 cursor-pointer transition-all duration-300 rounded-2xl overflow-hidden shadow-sm hover:shadow-md"
+        >
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">الموردين والفنيين</span>
+              <p className="text-xl font-bold tracking-tight text-indigo-700 dark:text-indigo-400">{formatCurrencyLYD(totalPurchasePaymentsSum)}</p>
+            </div>
+            <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+              <ArrowUpRight className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Card 5: Expenses */}
+        <Card 
+          onClick={() => navigate("/all-expenses")}
+          className="border border-border/40 bg-gradient-to-br from-orange-500/[0.03] to-transparent hover:border-orange-500/20 cursor-pointer transition-all duration-300 rounded-2xl overflow-hidden shadow-sm hover:shadow-md"
+        >
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">المصروفات العامة</span>
+              <p className="text-xl font-bold tracking-tight text-orange-700 dark:text-orange-400">{formatCurrencyLYD(totalExpensesSum)}</p>
+            </div>
+            <div className="p-2.5 rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400">
+              <FileText className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Card 6: Loans & Custodies */}
         <Card 
           onClick={() => setActiveTab("loans")}
-          className="border border-border/40 bg-gradient-to-br from-rose-500/[0.03] to-transparent hover:border-rose-500/20 cursor-pointer transition-all duration-300 rounded-2xl overflow-hidden shadow-sm hover:shadow-md"
-        >
-          <CardContent className="p-5 flex items-center justify-between">
-            <div className="space-y-1.5">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">إجمالي السلف المعلقة</span>
-              <p className="text-2xl font-bold tracking-tight text-rose-700 dark:text-rose-400">{formatCurrencyLYD(totalActiveLoans)}</p>
-            </div>
-            <div className="p-3 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400">
-              <Banknote className="h-6 w-6" />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Card 4: Custodies */}
-        <Card 
-          onClick={() => navigate("/transfers")}
           className="border border-border/40 bg-gradient-to-br from-purple-500/[0.03] to-transparent hover:border-purple-500/20 cursor-pointer transition-all duration-300 rounded-2xl overflow-hidden shadow-sm hover:shadow-md"
         >
-          <CardContent className="p-5 flex items-center justify-between">
-            <div className="space-y-1.5">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">العهد والمصاريف النشطة</span>
-              <p className="text-2xl font-bold tracking-tight text-purple-700 dark:text-purple-400">{formatCurrencyLYD(totalActiveAdvances)}</p>
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">السلف والعهد المعلقة</span>
+              <p className="text-xl font-bold tracking-tight text-purple-700 dark:text-purple-400">{formatCurrencyLYD(totalActiveLoans + totalActiveAdvances)}</p>
             </div>
-            <div className="p-3 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
-              <CreditCard className="h-6 w-6" />
+            <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+              <CreditCard className="h-5 w-5" />
             </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Styled Custom Tab Bar */}
-      <div className="flex border-b border-border/60 pb-px">
+      <div className="flex border-b border-border/60 pb-px overflow-x-auto">
         <button
           onClick={() => setActiveTab("accounts")}
-          className={`pb-3 px-6 text-sm font-semibold border-b-2 transition-all cursor-pointer ${
+          className={`pb-3 px-6 text-sm font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
             activeTab === "accounts"
               ? "border-amber-500 text-amber-600 dark:text-amber-400"
               : "border-transparent text-muted-foreground hover:text-foreground"
@@ -372,9 +539,21 @@ const Treasuries = () => {
         >
           الخزائن والحسابات المصرفية ({parentTreasuries.length})
         </button>
+
+        <button
+          onClick={() => setActiveTab("transactions")}
+          className={`pb-3 px-6 text-sm font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === "transactions"
+              ? "border-amber-500 text-amber-600 dark:text-amber-400"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          كشف الحركات المالية الشامل ({allTransactions.length})
+        </button>
+
         <button
           onClick={() => setActiveTab("loans")}
-          className={`pb-3 px-6 text-sm font-semibold border-b-2 transition-all cursor-pointer ${
+          className={`pb-3 px-6 text-sm font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
             activeTab === "loans"
               ? "border-amber-500 text-amber-600 dark:text-amber-400"
               : "border-transparent text-muted-foreground hover:text-foreground"
@@ -384,7 +563,7 @@ const Treasuries = () => {
         </button>
       </div>
 
-      {/* Tab Content 1: Accounts */}
+      {/* Tab Content 1: Accounts Grid */}
       {activeTab === "accounts" && (
         <div className="space-y-6">
           {parentTreasuries.length === 0 ? (
@@ -513,10 +692,114 @@ const Treasuries = () => {
         </div>
       )}
 
-      {/* Tab Content 2: Loans */}
+      {/* Tab Content 2: Comprehensive Transactions Log */}
+      {activeTab === "transactions" && (
+        <div className="space-y-4">
+          {/* Controls & Filters */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-muted/20 p-4 rounded-2xl border border-border/40">
+            <div className="relative w-full sm:w-80">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="بحث في الحركات أو الخزائن..."
+                value={txSearchQuery}
+                onChange={(e) => setTxSearchQuery(e.target.value)}
+                className="pr-9 h-9 text-xs rounded-xl bg-background"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+              <Select value={txTypeFilter} onValueChange={setTxTypeFilter}>
+                <SelectTrigger className="w-full sm:w-48 h-9 text-xs rounded-xl bg-background">
+                  <SelectValue placeholder="نوع الحركة" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">جميع الحركات</SelectItem>
+                  <SelectItem value="deposit">الإيداعات (مقبوضات)</SelectItem>
+                  <SelectItem value="withdrawal">السحوبات (مدفوعات)</SelectItem>
+                  <SelectItem value="client_payment">مقبوضات الزبائن</SelectItem>
+                  <SelectItem value="purchase_payments">مدفوعات الموردين والفنيين</SelectItem>
+                  <SelectItem value="expense">المصروفات التشغيلية</SelectItem>
+                  <SelectItem value="transfer">التحويلات بين الخزائن</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Transactions Table */}
+          <Card className="border border-border/40 shadow-sm rounded-2xl overflow-hidden">
+            <Table>
+              <TableHeader className="bg-muted/30">
+                <TableRow>
+                  <TableHead className="text-right">التاريخ</TableHead>
+                  <TableHead className="text-right">الخزينة / الحساب</TableHead>
+                  <TableHead className="text-right">نوع الحركة</TableHead>
+                  <TableHead className="text-right">البيان / التفاصيل</TableHead>
+                  <TableHead className="text-right">المبلغ</TableHead>
+                  <TableHead className="text-center">إجراءات</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredTransactions.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-10 text-muted-foreground text-xs">
+                      لا توجد حركات مالية مسجلة تطابق التصفية
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredTransactions.map((tx) => {
+                    const isDeposit = tx.type === "deposit";
+                    return (
+                      <TableRow key={tx.id} className="hover:bg-muted/30 transition-colors">
+                        <TableCell className="font-medium text-xs whitespace-nowrap">
+                          {tx.date}
+                        </TableCell>
+                        <TableCell className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                          {tx.treasuries?.name || "خزينة غير محددة"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge 
+                            variant="outline" 
+                            className={`text-[10px] gap-1 ${
+                              isDeposit 
+                                ? "border-emerald-500/30 text-emerald-700 bg-emerald-500/5 dark:text-emerald-400" 
+                                : "border-rose-500/30 text-rose-700 bg-rose-500/5 dark:text-rose-400"
+                            }`}
+                          >
+                            {isDeposit ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
+                            {isDeposit ? "إيداع / مقبوضات" : "سحب / مدفوعات"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs max-w-xs truncate">
+                          <span className="font-medium text-foreground">{tx.description || tx.source_details || "حركة مالية"}</span>
+                          {tx.notes && <p className="text-[10px] text-muted-foreground truncate">{tx.notes}</p>}
+                        </TableCell>
+                        <TableCell className={`text-sm font-bold whitespace-nowrap ${isDeposit ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                          {isDeposit ? "+" : "-"}{formatCurrencyLYD(Number(tx.amount))}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => handlePrintReceipt(tx)}
+                            title="طباعة إيصال الحركة"
+                            className="h-7 w-7 hover:bg-amber-500/10 hover:text-amber-600"
+                          >
+                            <Printer className="h-3.5 w-3.5" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </Card>
+        </div>
+      )}
+
+      {/* Tab Content 3: Loans & Custodies */}
       {activeTab === "loans" && (
         <div className="space-y-6">
-          {/* Header row for Loans */}
           <div className="flex items-center justify-between">
             <h3 className="text-base font-bold flex items-center gap-2">
               <Banknote className="h-5 w-5 text-amber-600" />
@@ -603,7 +886,7 @@ const Treasuries = () => {
                       <span className="text-base font-extrabold text-purple-600">{formatCurrencyLYD(Number(adv.amount))}</span>
                     </div>
                     <Badge variant="outline" className="text-[10px] border-purple-500/20 text-purple-700 dark:text-purple-400 bg-purple-500/5">
-                      {adv.subtype === "permanent" ? "عهد دائمة" : "لمرة واحدة"}
+                      نشطة
                     </Badge>
                   </div>
                 </div>
@@ -613,257 +896,224 @@ const Treasuries = () => {
         </div>
       )}
 
-      {/* Add/Edit Treasury Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) handleClose(); else setDialogOpen(true); }}>
-        <DialogContent className="max-w-md" dir="rtl">
+      {/* Dialog for Add/Edit Treasury */}
+      <Dialog open={dialogOpen} onOpenChange={handleClose}>
+        <DialogContent className="sm:max-w-[450px]" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold">
-              {editing
-                ? "تعديل بيانات الخزينة"
-                : dialogMode === "parent"
-                  ? "إضافة خزينة رئيسية جديدة"
-                  : "إضافة فرع / حساب بنكي جديد"}
+            <DialogTitle>
+              {editing 
+                ? "تعديل بيانات الخزينة" 
+                : dialogMode === "parent" 
+                  ? "إضافة خزينة رئيسية" 
+                  : "إضافة فرع / حساب مصرفي"}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-3 text-right">
+
+          <div className="space-y-4 py-3">
+            <div className="space-y-2">
+              <Label>اسم الخزينة / الفرع *</Label>
+              <Input
+                placeholder="مثلاً: خزينة المقاولات، حساب مصرف الوحدة..."
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              />
+            </div>
+
             {dialogMode === "child" && (
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">نوع الفرع *</Label>
-                <Select value={formData.treasury_type} onValueChange={(v) => setFormData({ ...formData, treasury_type: v })}>
-                  <SelectTrigger className="rounded-lg">
+              <div className="space-y-2">
+                <Label>نوع الحساب</Label>
+                <Select
+                  value={formData.treasury_type}
+                  onValueChange={(val) => setFormData({ ...formData, treasury_type: val })}
+                >
+                  <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cash">نقدي (كاش)</SelectItem>
-                    <SelectItem value="bank">حساب مصرفي</SelectItem>
+                    <SelectItem value="cash">نقدي (كاش / فرع)</SelectItem>
+                    <SelectItem value="bank">حساب مصرفي (بنك)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             )}
-            
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">{dialogMode === "parent" ? "اسم الخزينة *" : "اسم الفرع *"}</Label>
-              <Input
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder={
-                  dialogMode === "parent"
-                    ? "مثال: خزينة المكتب الرئيسية"
-                    : formData.treasury_type === "bank"
-                      ? "مثال: حساب مصرف الأمان"
-                      : "مثال: كاش الموقع"
-                }
-                className="rounded-lg"
-              />
-            </div>
-            
+
             {dialogMode === "child" && formData.treasury_type === "bank" && (
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">اسم المصرف</Label>
+              <>
+                <div className="space-y-2">
+                  <Label>اسم البنك</Label>
                   <Input
-                    value={formData.bank_name || ""}
+                    placeholder="مثال: مصرف الوحدة، البنك التجاري..."
+                    value={formData.bank_name}
                     onChange={(e) => setFormData({ ...formData, bank_name: e.target.value })}
-                    placeholder="مثال: مصرف الأمان"
-                    className="rounded-lg"
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">رقم الحساب</Label>
+                <div className="space-y-2">
+                  <Label>رقم الحساب المصرفي</Label>
                   <Input
-                    value={formData.account_number || ""}
+                    placeholder="0123456789..."
+                    value={formData.account_number}
                     onChange={(e) => setFormData({ ...formData, account_number: e.target.value })}
-                    placeholder="رقم الحساب"
-                    className="rounded-lg text-left"
                   />
                 </div>
-              </div>
+              </>
             )}
-            
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">الوصف</Label>
-              <Textarea
+
+            <div className="space-y-2">
+              <Label>الوصف</Label>
+              <Input
+                placeholder="وصف مختصر للغرض من الخزينة..."
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                placeholder="تفاصيل إضافية للتعريف..."
-                rows={2}
-                className="rounded-lg resize-none"
               />
             </div>
-            
-            <div className="flex items-center gap-2 bg-muted/40 p-2.5 rounded-lg border border-border/30">
+
+            <div className="space-y-2">
+              <Label>ملاحظات</Label>
+              <Textarea
+                placeholder="أي ملاحظات إضافية..."
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                rows={2}
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <Label>الحالة (نشطة / معطلة)</Label>
               <Switch
                 checked={formData.is_active}
                 onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
               />
-              <Label className="text-xs font-semibold cursor-pointer select-none">تفعيل الخزينة (نشطة لاستلام وإرسال المبالغ)</Label>
-            </div>
-            
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">ملاحظات داخلية</Label>
-              <Textarea
-                value={formData.notes}
-                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                placeholder="ملاحظات أخرى..."
-                rows={2}
-                className="rounded-lg resize-none"
-              />
             </div>
           </div>
-          <DialogFooter className="gap-2 sm:gap-0 mt-2">
-            <Button variant="outline" onClick={handleClose} className="rounded-lg">
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={handleClose}>
               إلغاء
             </Button>
-            <Button onClick={handleSave} disabled={saveMutation.isPending} className="bg-amber-600 hover:bg-amber-700 text-white rounded-lg">
-              {saveMutation.isPending ? "جاري الحفظ..." : editing ? "حفظ التعديلات" : "إضافة"}
+            <Button onClick={handleSave} className="bg-amber-600 hover:bg-amber-700 text-white">
+              <Save className="h-4 w-4 ml-1.5" />
+              حفظ البيانات
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Alert */}
-      <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
-        <AlertDialogContent dir="rtl">
-          <AlertDialogHeader className="text-right">
-            <AlertDialogTitle className="font-bold flex items-center gap-2 text-red-600">
-              <ShieldAlert className="h-5 w-5" />
-              تأكيد حذف الخزينة
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-xs">
-              هل أنت متأكد من رغبتك في حذف هذا العنصر؟ سيؤدي هذا إلى حذف الخزينة الرئيسية وجميع فروعها وحساباتها نهائياً من النظام. لا يمكن التراجع عن هذا الإجراء.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="gap-2 sm:gap-0">
-            <AlertDialogCancel className="rounded-lg text-xs">إلغاء</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => deleteId && deleteMutation.mutate(deleteId)}
-              className="bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold"
-            >
-              حذف نهائي
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Transfer Dialog */}
-      <Dialog open={transferDialogOpen} onOpenChange={(open) => { if (!open) { setTransferDialogOpen(false); setTransferForm({ fromTreasuryId: "", toTreasuryId: "", amount: 0, reason: "", date: new Date().toISOString().split("T")[0] }); } }}>
-        <DialogContent className="max-w-md" dir="rtl">
+      {/* Dialog for Transfer Between Treasuries */}
+      <Dialog open={transferDialogOpen} onOpenChange={setTransferDialogOpen}>
+        <DialogContent className="sm:max-w-[450px]" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2">
               <ArrowLeftRight className="h-5 w-5 text-amber-600" />
-              نقل أموال بين الخزائن والفروع
+              نقل مبلغ بين الخزائن
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-3 text-right">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">من خزينة (المصدر) *</Label>
-              <Select value={transferForm.fromTreasuryId} onValueChange={(v) => setTransferForm({ ...transferForm, fromTreasuryId: v, toTreasuryId: transferForm.toTreasuryId === v ? "" : transferForm.toTreasuryId })}>
-                <SelectTrigger className="rounded-lg">
+
+          <div className="space-y-4 py-3">
+            <div className="space-y-2">
+              <Label>من الخزينة المصدر *</Label>
+              <Select
+                value={transferForm.fromTreasuryId}
+                onValueChange={(val) => setTransferForm({ ...transferForm, fromTreasuryId: val })}
+              >
+                <SelectTrigger>
                   <SelectValue placeholder="اختر الخزينة المصدر" />
                 </SelectTrigger>
                 <SelectContent>
-                  {childTreasuries.filter(t => t.is_active).map(t => {
-                    const parent = parentTreasuries.find(p => p.id === t.parent_id);
-                    return (
-                      <SelectItem key={t.id} value={t.id}>
-                        {parent ? `${parent.name} / ` : ""}{t.name} ({formatCurrencyLYD(t.balance)})
-                      </SelectItem>
-                    );
-                  })}
+                  {childTreasuries.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name} (الرصيد: {formatCurrencyLYD(t.balance)})
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-            
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">إلى خزينة (الوجهة) *</Label>
-              <Select value={transferForm.toTreasuryId} onValueChange={(v) => setTransferForm({ ...transferForm, toTreasuryId: v })}>
-                <SelectTrigger className="rounded-lg">
+
+            <div className="space-y-2">
+              <Label>إلى الخزينة الوجهة *</Label>
+              <Select
+                value={transferForm.toTreasuryId}
+                onValueChange={(val) => setTransferForm({ ...transferForm, toTreasuryId: val })}
+              >
+                <SelectTrigger>
                   <SelectValue placeholder="اختر الخزينة الوجهة" />
                 </SelectTrigger>
                 <SelectContent>
-                  {childTreasuries.filter(t => t.is_active && t.id !== transferForm.fromTreasuryId).map(t => {
-                    const parent = parentTreasuries.find(p => p.id === t.parent_id);
-                    return (
+                  {childTreasuries
+                    .filter((t) => t.id !== transferForm.fromTreasuryId)
+                    .map((t) => (
                       <SelectItem key={t.id} value={t.id}>
-                        {parent ? `${parent.name} / ` : ""}{t.name} ({formatCurrencyLYD(t.balance)})
+                        {t.name} (الرصid: {formatCurrencyLYD(t.balance)})
                       </SelectItem>
-                    );
-                  })}
+                    ))}
                 </SelectContent>
               </Select>
             </div>
-            
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">المبلغ المراد نقله (د.ل) *</Label>
+
+            <div className="space-y-2">
+              <Label>المبلغ المراد نقله (د.ل) *</Label>
               <Input
                 type="number"
-                step="0.01"
-                value={transferForm.amount || ""}
-                onChange={(e) => setTransferForm({ ...transferForm, amount: Number(e.target.value) })}
                 placeholder="0.00"
-                className="rounded-lg font-bold text-base text-amber-700"
-              />
-              {transferForm.fromTreasuryId && (
-                <p className="text-[11px] text-muted-foreground bg-amber-500/5 p-1 px-2 rounded border border-amber-500/10 inline-block">
-                  الرصيد المتاح للتحويل: {formatCurrencyLYD(treasuries?.find(t => t.id === transferForm.fromTreasuryId)?.balance || 0)}
-                </p>
-              )}
-            </div>
-            
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">البيان وسبب النقل *</Label>
-              <Textarea
-                value={transferForm.reason}
-                onChange={(e) => setTransferForm({ ...transferForm, reason: e.target.value })}
-                placeholder="اكتب تفاصيل أو سبب تحويل ونقل هذه الأموال..."
-                rows={2}
-                className="rounded-lg resize-none"
+                value={transferForm.amount || ""}
+                onChange={(e) => setTransferForm({ ...transferForm, amount: parseFloat(e.target.value) || 0 })}
               />
             </div>
-            
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">تاريخ العملية</Label>
+
+            <div className="space-y-2">
+              <Label>التاريخ</Label>
               <Input
                 type="date"
                 value={transferForm.date}
                 onChange={(e) => setTransferForm({ ...transferForm, date: e.target.value })}
-                className="rounded-lg"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>سبب التحويل / ملاحظات</Label>
+              <Textarea
+                placeholder="سبب إجراء التحويل بين الخزينتين..."
+                value={transferForm.reason}
+                onChange={(e) => setTransferForm({ ...transferForm, reason: e.target.value })}
+                rows={2}
               />
             </div>
           </div>
-          <DialogFooter className="gap-2 sm:gap-0 mt-2">
-            <Button variant="outline" onClick={() => setTransferDialogOpen(false)} className="rounded-lg">
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setTransferDialogOpen(false)}>
               إلغاء
             </Button>
-            <Button
-              onClick={() => {
-                if (!transferForm.fromTreasuryId || !transferForm.toTreasuryId) {
-                  toast({ title: "خطأ", description: "يرجى اختيار الخزينتين", variant: "destructive" });
-                  return;
-                }
-                if (transferForm.amount <= 0) {
-                  toast({ title: "خطأ", description: "يرجى إدخال مبلغ صحيح", variant: "destructive" });
-                  return;
-                }
-                if (!transferForm.reason.trim()) {
-                  toast({ title: "خطأ", description: "يرجى كتابة سبب النقل", variant: "destructive" });
-                  return;
-                }
-                const fromBalance = treasuries?.find(t => t.id === transferForm.fromTreasuryId)?.balance || 0;
-                if (transferForm.amount > fromBalance) {
-                  toast({ title: "خطأ", description: "الرصيد غير كافٍ في الخزينة المصدر", variant: "destructive" });
-                  return;
-                }
-                transferMutation.mutate(transferForm);
-              }}
-              disabled={transferMutation.isPending}
-              className="bg-amber-600 hover:bg-amber-700 text-white rounded-lg"
+            <Button 
+              onClick={() => transferMutation.mutate(transferForm)} 
+              disabled={transferMutation.isPending || !transferForm.fromTreasuryId || !transferForm.toTreasuryId || transferForm.amount <= 0}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
             >
-              {transferMutation.isPending ? "جاري التحويل..." : "تحويل الآن"}
+              تحويل المبلغ
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Alert Dialog for Confirm Delete */}
+      <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+        <AlertDialogContent dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>هل أنت تأكد من إمكانية حذف هذه الخزينة؟</AlertDialogTitle>
+            <AlertDialogDescription>
+              سوف يتم حذف الخزينة ومسح بيانات الحساب نهائياً، لا يمكن التراجع عن هذا الإجراء إذا كانت مرتبطة بحركات.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={() => deleteId && deleteMutation.mutate(deleteId)}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              تأكيد الحذف
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

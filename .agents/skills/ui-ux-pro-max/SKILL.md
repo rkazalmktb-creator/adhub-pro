@@ -9,7 +9,7 @@ Distilled from the [UI/UX Pro Max](https://github.com/nextlevelbuilder/ui-ux-pro
 
 ## Core principles (apply to every visual change)
 
-1. **Never use emoji or unicode characters as icons anywhere in the project (including print windows, toolbars, and PDFs).** Always use SVG (Lucide-react or inline SVG paths) which can be styled and colored using CSS/SVG properties. Characters like 📍, ✓, ✕, 🖨️, &#128438;, and &#10005; are strictly forbidden.
+1. **STRICT ZERO-EMOJI RULE: Never use emoji or unicode characters anywhere in the project UI (including toasts, tabs, badges, select items, print windows, toolbars, and PDFs).** Always use recolorable SVG icons from `lucide-react` (e.g. `<Sparkles className="h-4 w-4 text-purple-600" />`, `<Settings className="h-4 w-4 text-blue-600" />`, `<Trash2 className="h-4 w-4 text-destructive" />`). Unicode emojis (like ⚙️, ✨, 🗑️, 🎉, 💰, ⚠️, ✅, ❌, 📌, 🖨️, ✓, ✕) are strictly forbidden and MUST NOT be used in code under any circumstances.
 2. **`cursor-pointer`** on every clickable element. Hover states with `transition-all duration-200`.
 3. **Contrast 4.5:1 minimum** for body text against background, 3:1 for large text.
 4. **No generic AI aesthetics:** no purple-to-pink gradients, no Inter/Poppins default pairings, no white card on white background.

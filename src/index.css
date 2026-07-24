@@ -105,10 +105,12 @@ All colors MUST be HSL.
 @layer base {
   * {
     @apply border-border;
+    font-family: 'Cairo', system-ui, -apple-system, sans-serif;
   }
 
-  body {
-    @apply bg-background text-foreground font-sans;
+  body, input, button, select, textarea {
+    font-family: 'Cairo', system-ui, -apple-system, sans-serif;
+    @apply bg-background text-foreground;
     direction: rtl;
   }
 

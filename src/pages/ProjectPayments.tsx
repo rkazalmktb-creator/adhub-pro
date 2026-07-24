@@ -50,6 +50,7 @@ import {
   Download,
   Users,
   Building2,
+  CheckCircle2,
 } from "lucide-react";
 import { openPrintWindow, getPrintValues, generatePrintStyles } from "@/lib/printStyles";
 import { toast } from "@/hooks/use-toast";
@@ -929,8 +930,8 @@ const ProjectPayments = () => {
             </div>
             {selectedProjectId && project && (
               <div className="mt-3 p-2.5 bg-primary/5 border border-primary/15 rounded-lg flex items-center justify-between">
-                <span className="text-xs text-primary font-semibold">
-                  ✓ تم تحديد: {project.name}
+                <span className="text-xs text-primary font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="h-3.5 w-3.5 inline text-emerald-600" /> تم تحديد: {project.name}
                 </span>
                 <Button size="sm" variant="ghost" className="h-6 text-xs text-muted-foreground px-2" onClick={() => setSelectedProjectId("")}>
                   تغيير

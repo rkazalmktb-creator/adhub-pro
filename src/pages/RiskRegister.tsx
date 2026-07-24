@@ -18,13 +18,13 @@ import {
 } from "lucide-react";
 
 const CATEGORIES: Record<string, string> = {
-  financial: "💰 مالي",
-  technical: "🔧 تقني",
-  weather: "🌧️ طقس",
-  supplier: "🚛 موردون",
-  scope: "📐 نطاق العمل",
-  safety: "⛑️ سلامة",
-  other: "📌 أخرى",
+  financial: "مالي",
+  technical: "تقني",
+  weather: "طقس",
+  supplier: "موردون",
+  scope: "نطاق العمل",
+  safety: "سلامة",
+  other: "أخرى",
 };
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -36,10 +36,10 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 };
 
 const getRiskLevel = (score: number) => {
-  if (score >= 15) return { label: "حرج 🔴", color: "text-red-600", bg: "bg-red-500/10 border-red-500/30" };
-  if (score >= 9) return { label: "عالي 🟠", color: "text-orange-600", bg: "bg-orange-500/10 border-orange-500/30" };
-  if (score >= 4) return { label: "متوسط 🟡", color: "text-yellow-600", bg: "bg-yellow-500/10 border-yellow-500/30" };
-  return { label: "منخفض 🟢", color: "text-green-600", bg: "bg-green-500/10 border-green-500/30" };
+  if (score >= 15) return { label: "حرج", color: "text-red-600", bg: "bg-red-500/10 border-red-500/30" };
+  if (score >= 9) return { label: "عالي", color: "text-orange-600", bg: "bg-orange-500/10 border-orange-500/30" };
+  if (score >= 4) return { label: "متوسط", color: "text-yellow-600", bg: "bg-yellow-500/10 border-yellow-500/30" };
+  return { label: "منخفض", color: "text-green-600", bg: "bg-green-500/10 border-green-500/30" };
 };
 
 const emptyForm = {
@@ -114,7 +114,7 @@ const RiskRegister = () => {
       setShowForm(false);
       setEditingId(null);
       setForm(emptyForm);
-      toast({ title: "✅ تم الحفظ بنجاح" });
+      toast({ title: "تم الحفظ بنجاح" });
     },
     onError: () => toast({ title: "خطأ في الحفظ", variant: "destructive" }),
   });
@@ -126,7 +126,7 @@ const RiskRegister = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["risk-register"] });
-      toast({ title: "✅ تم الحذف" });
+      toast({ title: "تم الحذف بنجاح" });
     },
   });
 
@@ -207,10 +207,10 @@ const RiskRegister = () => {
         <CardContent className="pt-4 pb-4">
           <p className="text-xs font-semibold text-muted-foreground mb-2">مصفوفة المخاطر (الاحتمالية × التأثير)</p>
           <div className="flex gap-3 flex-wrap">
-            <Badge className="bg-green-500/20 text-green-700 border-green-500/30">🟢 1-3 منخفض</Badge>
-            <Badge className="bg-yellow-500/20 text-yellow-700 border-yellow-500/30">🟡 4-8 متوسط</Badge>
-            <Badge className="bg-orange-500/20 text-orange-700 border-orange-500/30">🟠 9-14 عالي</Badge>
-            <Badge className="bg-red-500/20 text-red-700 border-red-500/30">🔴 15-25 حرج</Badge>
+            <Badge className="bg-green-500/20 text-green-700 border-green-500/30">1-3 منخفض</Badge>
+            <Badge className="bg-yellow-500/20 text-yellow-700 border-yellow-500/30">4-8 متوسط</Badge>
+            <Badge className="bg-orange-500/20 text-orange-700 border-orange-500/30">9-14 عالي</Badge>
+            <Badge className="bg-red-500/20 text-red-700 border-red-500/30">15-25 حرج</Badge>
           </div>
         </CardContent>
       </Card>

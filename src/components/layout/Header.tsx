@@ -40,7 +40,7 @@ export const Header = () => {
         .from("company_settings")
         .select("*")
         .limit(1)
-        .single();
+        .maybeSingle();
       if (error) throw error;
       return data;
     },

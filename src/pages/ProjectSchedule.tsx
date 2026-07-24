@@ -126,7 +126,7 @@ const ProjectSchedule = () => {
       setShowForm(false);
       setEditingId(null);
       setForm(emptyForm);
-      toast({ title: "✅ تم الحفظ" });
+      toast({ title: "تم الحفظ بنجاح" });
     },
     onError: () => toast({ title: "خطأ في الحفظ", variant: "destructive" }),
   });
@@ -138,7 +138,7 @@ const ProjectSchedule = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["project-schedules"] });
-      toast({ title: "✅ تم الحذف" });
+      toast({ title: "تم الحذف بنجاح" });
     },
   });
 
@@ -208,14 +208,20 @@ const ProjectSchedule = () => {
           <CardContent className="pt-5">
             <p className="text-xs text-muted-foreground mb-1">مؤشر أداء التكلفة (CPI)</p>
             <p className={`text-2xl font-bold ${cpi >= 1 ? "text-green-600" : "text-red-600"}`}>{cpi.toFixed(2)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{cpi >= 1 ? "✅ ضمن الميزانية" : "⚠️ تجاوز الميزانية"}</p>
+            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+              {cpi >= 1 ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <AlertTriangle className="h-3.5 w-3.5 text-red-600" />}
+              <span>{cpi >= 1 ? "ضمن الميزانية" : "تجاوز الميزانية"}</span>
+            </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-5">
             <p className="text-xs text-muted-foreground mb-1">مؤشر أداء الجدول (SPI)</p>
             <p className={`text-2xl font-bold ${spi >= 1 ? "text-green-600" : "text-orange-600"}`}>{spi.toFixed(2)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{spi >= 1 ? "✅ في الموعد" : "⚠️ تأخر في الجدول"}</p>
+            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+              {spi >= 1 ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
+              <span>{spi >= 1 ? "في الموعد" : "تأخر في الجدول"}</span>
+            </div>
           </CardContent>
         </Card>
         <Card>

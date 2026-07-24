@@ -853,6 +853,7 @@ export type Database = {
           payment_method: string | null
           phase_id: string | null
           project_id: string | null
+          project_item_id?: string | null
           subtype: string | null
           supplier_id: string | null
           technician_id: string | null
@@ -1777,6 +1778,7 @@ export type Database = {
           paid_amount: number
           phase_id: string | null
           project_id: string | null
+          project_item_id?: string | null
           rental_id: string | null
           status: string | null
           supplier_id: string | null
@@ -2063,6 +2065,8 @@ export type Database = {
           notes: string | null
           project_item_id: string
           quantity_completed: number
+          rate?: number | null
+          earned_amount?: number | null
           technician_id: string
         }
         Insert: {

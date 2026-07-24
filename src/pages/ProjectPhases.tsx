@@ -520,7 +520,7 @@ const ProjectPhases = () => {
     
     // Fetch detailed data for the phase
     const [{ data: items }, { data: purchases }, { data: expenses }, { data: rentalPurchases }, { data: allocations }] = await Promise.all([
-      supabase.from("project_items").select("id, name, description, quantity, unit_price, total_price, measurement_type, length, width, height, measurement_factor, component_values, measurement_config_id, measurement_configs(name, unit_symbol), engineers(name), project_item_technicians(total_cost)").eq("phase_id", phase.id),
+      supabase.from("project_items").select("id, name, description, quantity, unit_price, total_price, measurement_type, length, width, height, measurement_factor, formula, component_values, measurement_config_id, measurement_configs(name, unit_symbol), engineers(name), project_item_technicians(total_cost)").eq("phase_id", phase.id),
       supabase.from("purchases").select("*, suppliers(name)").eq("phase_id", phase.id).is("rental_id", null),
       supabase.from("expenses").select("*").eq("phase_id", phase.id),
       supabase.from("purchases").select("*, equipment_rentals(equipment(name), start_date, end_date, daily_rate)").eq("phase_id", phase.id).not("rental_id", "is", null),
@@ -590,7 +590,8 @@ const ProjectPhases = () => {
       const totalDirhamsDisplay = totalDecimalPart > 0 ? String(totalDecimalPart).padStart(2, '0') : '---';
       const totalDinarsDisplay = totalIntegerPart.toLocaleString();
 
-      const engineerName = (project as any)?.engineers?.name || 'علي بن عروس شميله';
+      const signeeName = companySettings?.signee_name || (project as any)?.engineers?.name || 'علي بن عروس شميله';
+      const signeeTitle = companySettings?.signee_title || 'المهندس المشرف';
 
       let clientInvoiceHTML = `
         <style>
@@ -689,19 +690,76 @@ const ProjectPhases = () => {
                 const dirhamStr = decimalPart > 0 ? String(decimalPart).padStart(2, '0') : '---';
                 const dinarStr = integerPart.toLocaleString();
 
-                const componentLabels: Record<string, string> = { L: 'الطول', W: 'العرض', H: 'الارتفاع', D: 'القطر', T: 'السُمك' };
-                const cv = item.component_values as Record<string, number> | null;
-                let dims = '';
-                if (cv && Object.keys(cv).length > 0) {
-                  dims = Object.entries(cv).map(([k, v]) => `${componentLabels[k] || k}:${v}`).join(' × ');
+                const componentLabels: Record<string, string> = { 
+                  L: 'الطول', 
+                  W: 'العرض', 
+                  H: 'الارتفاع', 
+                  D: 'القطر', 
+                  T: 'السُمك',
+                  N: 'العدد'
+                };
+                const cv = item.component_values as Record<string, any> | null;
+                const factor = item.measurement_factor !== undefined && item.measurement_factor !== null 
+                  ? Number(item.measurement_factor) 
+                  : 1;
+
+                let equation = '';
+                if (item.formula) {
+                  let resolvedFormula = item.formula;
+                  const symbols = ['L', 'W', 'H', 'D', 'T', 'N'];
+                  symbols.forEach(sym => {
+                    const label = componentLabels[sym] || sym;
+                    const hasVal = cv && cv[sym] !== undefined && cv[sym] !== null && cv[sym] !== '';
+                    const valStr = hasVal ? parseFloat(String(cv[sym])).toString() : '';
+                    
+                    const regex = new RegExp(`\\b${sym}\\b`, 'g');
+                    if (resolvedFormula.match(regex)) {
+                      if (hasVal) {
+                        resolvedFormula = resolvedFormula.replace(regex, `${label} (${valStr})`);
+                      } else {
+                        resolvedFormula = resolvedFormula.replace(regex, label);
+                      }
+                    }
+                  });
+
+                  if (cv) {
+                    Object.keys(cv).forEach(key => {
+                      if (!symbols.includes(key)) {
+                        const val = parseFloat(String(cv[key])) || 0;
+                        resolvedFormula = resolvedFormula.replace(new RegExp(`\\b${key}\\b`, 'g'), `${key} (${val})`);
+                      }
+                    });
+                  }
+                  equation = resolvedFormula.replace(/\*/g, ' × ').replace(/\//g, ' ÷ ');
+                } else if (cv && Object.keys(cv).length > 0) {
+                  equation = Object.entries(cv)
+                    .map(([k, v]) => {
+                      const label = componentLabels[k] || k;
+                      const val = parseFloat(String(v)) || 0;
+                      return `${label} (${val})`;
+                    })
+                    .join(' × ');
                 } else {
-                  const parts = [
-                    item.length ? `${item.length}` : '',
-                    item.width ? `${item.width}` : '',
-                    item.height ? `${item.height}` : '',
-                  ].filter(Boolean).join(' × ');
-                  if (parts) dims = parts;
+                  const parts = [];
+                  if (item.length) parts.push(`الطول (${parseFloat(item.length)})`);
+                  if (item.width) parts.push(`العرض (${parseFloat(item.width)})`);
+                  if (item.height) parts.push(`الارتفاع (${parseFloat(item.height)})`);
+                  if (parts.length > 0) {
+                    equation = parts.join(' × ');
+                  }
                 }
+
+                equation = equation.trim();
+
+                if (equation && factor !== 1 && factor !== 0) {
+                  if (equation.includes('×') || equation.includes('+') || equation.includes('-') || equation.includes('÷')) {
+                    equation = `(${equation}) × ${factor}`;
+                  } else {
+                    equation = `${equation} × ${factor}`;
+                  }
+                }
+
+                const dims = equation;
 
                 const cleanDesc = (item.description || "").trim();
                 const displayDesc = (cleanDesc === "" || cleanDesc === "-") ? "" : cleanDesc;
@@ -736,10 +794,13 @@ const ProjectPhases = () => {
           </table>
 
           <!-- Signature Section -->
-          <div style="margin-top: 25px; display: flex; justify-content: flex-start; padding-left: 20px; page-break-inside: avoid; break-inside: avoid;">
+          <div style="margin-top: 25px; display: flex; justify-content: flex-end; padding-left: 20px; page-break-inside: avoid; break-inside: avoid;">
             <div style="text-align: center; width: 220px; display: flex; flex-direction: column; align-items: center; page-break-inside: avoid; break-inside: avoid;">
-              <p style="font-weight: bold; margin-bottom: 6px; font-size: 11pt;">
-                ${engineerName}
+              <p style="font-weight: bold; margin-bottom: 4px; font-size: 11pt;">
+                ${signeeName}
+              </p>
+              <p style="font-size: 10pt; color: #555; margin-top: 0; margin-bottom: 8px;">
+                ${signeeTitle}
               </p>
               <p style="font-weight: bold; font-size: 11pt; margin-top: 0; margin-bottom: 15px;">
                 التوقيع / .................
@@ -918,18 +979,73 @@ const ProjectPhases = () => {
 
       // Prepare row data
       const processedItems = items.map((item: any, idx: number) => {
-        const componentLabels: Record<string, string> = { L: 'الطول', W: 'العرض', H: 'الارتفاع', D: 'القطر', T: 'السُمك' };
-        const cv = item.component_values as Record<string, number> | null;
-        let dims = '';
-        if (cv && Object.keys(cv).length > 0) {
-          dims = Object.entries(cv).map(([k, v]) => `${componentLabels[k] || k}:${v}`).join(' × ');
+        const componentLabels: Record<string, string> = { 
+                  L: 'الطول', 
+                  W: 'العرض', 
+                  H: 'الارتفاع', 
+                  D: 'القطر', 
+                  T: 'السُمك',
+                  N: 'العدد'
+                };
+        const cv = item.component_values as Record<string, any> | null;
+        const factor = item.measurement_factor !== undefined && item.measurement_factor !== null 
+          ? Number(item.measurement_factor) 
+          : 1;
+
+        let equation = '';
+        if (item.formula) {
+          let resolvedFormula = item.formula;
+          const symbols = ['L', 'W', 'H', 'D', 'T', 'N'];
+          symbols.forEach(sym => {
+            const label = componentLabels[sym] || sym;
+            const hasVal = cv && cv[sym] !== undefined && cv[sym] !== null && cv[sym] !== '';
+            const valStr = hasVal ? parseFloat(String(cv[sym])).toString() : '';
+            
+            const regex = new RegExp(`\\b${sym}\\b`, 'g');
+            if (resolvedFormula.match(regex)) {
+              if (hasVal) {
+                resolvedFormula = resolvedFormula.replace(regex, `${label} (${valStr})`);
+              } else {
+                resolvedFormula = resolvedFormula.replace(regex, label);
+              }
+            }
+          });
+
+          if (cv) {
+            Object.keys(cv).forEach(key => {
+              if (!symbols.includes(key)) {
+                const val = parseFloat(String(cv[key])) || 0;
+                resolvedFormula = resolvedFormula.replace(new RegExp(`\\b${key}\\b`, 'g'), `${key} (${val})`);
+              }
+            });
+          }
+          equation = resolvedFormula.replace(/\*/g, ' × ').replace(/\//g, ' ÷ ');
+        } else if (cv && Object.keys(cv).length > 0) {
+          equation = Object.entries(cv)
+            .map(([k, v]) => {
+              const label = componentLabels[k] || k;
+              const val = parseFloat(String(v)) || 0;
+              return `${label} (${val})`;
+            })
+            .join(' × ');
         } else {
-          const parts = [
-            item.length ? `الطول:${item.length}` : '',
-            item.width ? `العرض:${item.width}` : '',
-            item.height ? `الارتفاع:${item.height}` : '',
-          ].filter(Boolean).join(' × ');
-          if (parts) dims = parts;
+          const parts = [];
+          if (item.length) parts.push(`الطول (${parseFloat(item.length)})`);
+          if (item.width) parts.push(`العرض (${parseFloat(item.width)})`);
+          if (item.height) parts.push(`الارتفاع (${parseFloat(item.height)})`);
+          if (parts.length > 0) {
+            equation = parts.join(' × ');
+          }
+        }
+
+        equation = equation.trim();
+
+        if (equation && factor !== 1 && factor !== 0) {
+          if (equation.includes('×') || equation.includes('+') || equation.includes('-') || equation.includes('÷')) {
+            equation = `(${equation}) × ${factor}`;
+          } else {
+            equation = `${equation} × ${factor}`;
+          }
         }
 
         const cleanDesc = (item.description || "").trim();
@@ -946,7 +1062,7 @@ const ProjectPhases = () => {
           name: item.name || '',
           description: displayDesc,
           unit: displayUnit,
-          dims: (dims === "" || dims === "-") ? "" : dims,
+          dims: (equation === "" || equation === "-") ? "" : equation,
           factor: displayFactor,
           quantity: item.quantity,
           unit_price: item.unit_price,
@@ -963,7 +1079,7 @@ const ProjectPhases = () => {
       const varCols = [
         { key: 'name', header: "البند", defaultWidth: 18, align: "right", active: true },
         { key: 'description', header: "الوصف", defaultWidth: 18, align: "right", active: hasDescription },
-        { key: 'dims', header: "الأبعاد", defaultWidth: 15, align: "center", active: hasDims },
+        { key: 'dims', header: "معادلة التفصيل", defaultWidth: 15, align: "center", active: hasDims },
         { key: 'factor', header: "عدد العناصر", defaultWidth: 10, align: "center", active: hasFactor }
       ];
       const activeVar = varCols.filter(c => c.active);
@@ -1989,7 +2105,7 @@ const ProjectPhases = () => {
                                         <div className="flex justify-between text-[10px] text-muted-foreground font-semibold mt-1 pt-1 border-t border-border/40">
                                           <span>المستحق: {formatCurrencyLYD(totalDue)}</span>
                                           <span className={remaining > 0 ? 'text-destructive font-bold' : 'text-emerald-600 font-bold'}>
-                                            المتبقي: {formatCurrencyLYD(Math.abs(remaining))}{remaining <= 0 ? ' ✓' : ''}
+                                            المتبقي: {formatCurrencyLYD(Math.abs(remaining))}
                                           </span>
                                         </div>
                                       </div>

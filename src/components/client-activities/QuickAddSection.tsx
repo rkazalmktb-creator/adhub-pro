@@ -165,7 +165,7 @@ const QuickAddSection = () => {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast({ title: "تمت إضافة فاتورة المشتريات بنجاح ✓" });
+      toast({ title: "تمت إضافة فاتورة المشتريات بنجاح" });
       setPurchaseForm((prev) => ({
         ...prev, invoice_number: "", total_amount: "", paid_amount: "", commission: "0",
         date: new Date().toISOString().split("T")[0], notes: "",
@@ -189,7 +189,7 @@ const QuickAddSection = () => {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast({ title: "تمت إضافة المصروف بنجاح ✓" });
+      toast({ title: "تمت إضافة المصروف بنجاح" });
       setExpenseForm({ description: "", amount: "", type: "materials", date: new Date().toISOString().split("T")[0], notes: "" });
       queryClient.invalidateQueries({ queryKey: ["all-expenses-client-projects"] });
     },
@@ -209,7 +209,7 @@ const QuickAddSection = () => {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast({ title: "تمت إضافة إيجار المعدات بنجاح ✓" });
+      toast({ title: "تمت إضافة إيجار المعدات بنجاح" });
       setRentalForm({ equipment_id: "", daily_rate: "", start_date: new Date().toISOString().split("T")[0], notes: "" });
       queryClient.invalidateQueries({ queryKey: ["all-rentals-client-projects"] });
       queryClient.invalidateQueries({ queryKey: ["quick-add-equipment"] });
@@ -235,7 +235,7 @@ const QuickAddSection = () => {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast({ title: "تمت إضافة بند المقاولات بنجاح ✓" });
+      toast({ title: "تمت إضافة بند المقاولات بنجاح" });
       setItemForm({ name: "", description: "", quantity: "", unit_price: "", measurement_type: "linear", notes: "" });
       queryClient.invalidateQueries({ queryKey: ["project-items"] });
       queryClient.invalidateQueries({ queryKey: ["all-items-client-projects"] });

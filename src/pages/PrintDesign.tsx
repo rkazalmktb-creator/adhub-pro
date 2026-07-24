@@ -40,7 +40,9 @@ import {
   ClipboardPaste,
   Trash2,
   Phone,
-  MapPin
+  MapPin,
+  CheckCircle2,
+  Lightbulb
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DEFAULT_PRINT_LABELS, getPrintLabels, PrintLabelsConfig } from "@/lib/printLabels";
@@ -422,7 +424,7 @@ const PrintDesign = () => {
         .from("company_settings")
         .select("*")
         .limit(1)
-        .single();
+        .maybeSingle();
       
       if (error) throw error;
       return data as CompanySettings & {
@@ -1342,8 +1344,9 @@ const PrintDesign = () => {
                               )}
                             </div>
                             {customFontData && (
-                              <p className="text-[10px] text-green-600 bg-green-50/50 p-1.5 rounded text-center border border-green-200/50">
-                                ✓ ملف الخط محمل ومحفوظ في الإعدادات
+                              <p className="text-[10px] text-green-600 bg-green-50/50 p-1.5 rounded text-center border border-green-200/50 flex items-center justify-center gap-1">
+                                <CheckCircle2 className="h-3 w-3 inline text-emerald-600" />
+                                <span>ملف الخط محمل ومحفوظ في الإعدادات</span>
                               </p>
                             )}
                           </div>
@@ -1360,8 +1363,9 @@ const PrintDesign = () => {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <p className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
-                        💡 يمكنك تصغير أو تكبير حجم جميع عناصر الصفحة والجداول والمجاميع بنسبة معينة لتناسب حجم الورق ومساحة العرض وتفادي التداخل.
+                      <p className="text-xs text-muted-foreground bg-muted/50 rounded p-2 flex items-start gap-1.5">
+                        <Lightbulb className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                        <span>يمكنك تصغير أو تكبير حجم جميع عناصر الصفحة والجداول والمجاميع بنسبة معينة لتناسب حجم الورق ومساحة العرض وتفادي التداخل.</span>
                       </p>
                       <SliderInput 
                         label="نسبة التكبير/التصغير" 
@@ -1382,8 +1386,9 @@ const PrintDesign = () => {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <p className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
-                        💡 الهوامش تُطبق على كل صفحة تلقائياً. عند امتلاء الصفحة ينتقل المحتوى للصفحة التالية مع الحفاظ على نفس الهوامش والتصميم.
+                      <p className="text-xs text-muted-foreground bg-muted/50 rounded p-2 flex items-start gap-1.5">
+                        <Lightbulb className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                        <span>الهوامش تُطبق على كل صفحة تلقائياً. عند امتلاء الصفحة ينتقل المحتوى للصفحة التالية مع الحفاظ على نفس الهوامش والتصميم.</span>
                       </p>
                       <SliderInput 
                         label="الهامش العلوي" 

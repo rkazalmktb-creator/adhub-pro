@@ -156,6 +156,15 @@ export default function Debts() {
     },
   });
 
+  const { data: contracts } = useQuery({
+    queryKey: ["all-contracts-debts"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("contracts").select("id, client_id, project_id, amount, status");
+      if (error) throw error;
+      return data;
+    },
+  });
+
   // Calculate debts per client
   const clientsDebtsList = useMemo(() => {
     if (!clients || !projects || !phases || !projectItems || !purchases || !clientPayments) return [];
@@ -163,6 +172,7 @@ export default function Debts() {
     return clients.map((client) => {
       const clientProjList = projects.filter((p) => p.client_id === client.id);
       const projectIds = clientProjList.map((p) => p.id);
+      const clientContracts = (contracts || []).filter(c => c.client_id === client.id && c.status !== "cancelled");
 
       const clientPhases = phases.filter((ph) => projectIds.includes(ph.project_id));
 
@@ -191,7 +201,22 @@ export default function Debts() {
         totalPercentageFeeBilled += phasePercentageFee;
       });
 
-      const totalBilled = totalItemsBilled + totalPurchBilled + totalRentBilled + totalPercentageFeeBilled;
+      // Calculate baseline value adjustments (contracts and approved budgets)
+      let baselineAdjustment = 0;
+      clientProjList.forEach((proj) => {
+        const projItems = projectItems.filter(item => item.project_id === proj.id);
+        const itemsSum = projItems.reduce((sum, item) => sum + Number(item.total_price || 0), 0);
+        const projContracts = clientContracts.filter(c => c.project_id === proj.id || (!c.project_id && c.client_id === proj.client_id && proj.project_type === "contracting"));
+        const contractsSum = projContracts.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+        const budgetVal = Number(proj.budget || 0);
+
+        const projectBase = Math.max(itemsSum, contractsSum, budgetVal);
+        if (projectBase > itemsSum) {
+          baselineAdjustment += (projectBase - itemsSum);
+        }
+      });
+
+      const totalBilled = totalItemsBilled + baselineAdjustment + totalPurchBilled + totalRentBilled + totalPercentageFeeBilled;
 
       const clientPaymentsList = clientPayments.filter((cp) => cp.client_id === client.id);
       const totalPaid = clientPaymentsList.reduce((sum, cp) => sum + Number(cp.amount || 0), 0);
@@ -222,7 +247,7 @@ export default function Debts() {
         lastInvoiceDate,
       };
     });
-  }, [clients, projects, phases, projectItems, purchases, clientPayments]);
+  }, [clients, projects, phases, projectItems, purchases, clientPayments, contracts]);
 
   // Filter and sort
   const filteredAndSortedDebts = useMemo(() => {

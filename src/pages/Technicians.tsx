@@ -84,6 +84,7 @@ const Technicians = () => {
           project_item:project_items(
             id,
             name,
+            unit_price,
             project_id
           )
         `)
@@ -113,6 +114,36 @@ const Technicians = () => {
         .from("expenses")
         .select("*")
         .not("technician_id", "is", null);
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Fetch all purchases for technicians
+  const { data: allPurchases } = useQuery({
+    queryKey: ["all-technicians-purchases"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("purchases")
+        .select("*")
+        .not("technician_id", "is", null);
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Fetch all purchase payments for technicians
+  const { data: allPurchasePayments } = useQuery({
+    queryKey: ["all-technicians-purchase-payments"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("purchase_payments")
+        .select(`
+          *,
+          purchases!inner (
+            technician_id
+          )
+        `);
       if (error) throw error;
       return data;
     },
@@ -159,14 +190,31 @@ const Technicians = () => {
       
       // Calculate total deserved
       let totalDeserved = 0;
-      techProgress.forEach((record) => {
-        const rate = ratesMap.get(record.project_item_id) || 0;
-        totalDeserved += record.quantity_completed * rate;
+      techProgress.forEach((record: any) => {
+        const directEarned = Number(record.earned_amount || 0);
+        if (directEarned > 0) {
+          totalDeserved += directEarned;
+        } else {
+          let rate = Number(record.rate || 0);
+          if (!rate) rate = ratesMap.get(record.project_item_id) || 0;
+          if (!rate) rate = Number(tech.meter_rate || tech.piece_rate || tech.daily_rate || tech.hourly_rate || 0);
+          totalDeserved += (Number(record.quantity_completed) * rate);
+        }
       });
+
+      // Add purchases (labor invoices) to totalDeserved
+      const techPurchases = allPurchases?.filter((p: any) => p.technician_id === tech.id) || [];
+      totalDeserved += techPurchases.reduce((acc: number, p: any) => acc + Number(p.total_amount || 0), 0);
 
       // Get expenses (withdrawn) for this technician
       const techExpenses = allExpenses?.filter((e) => e.technician_id === tech.id) || [];
-      const totalWithdrawn = techExpenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
+      const totalExpensesPaid = techExpenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
+
+      // Get purchase payments for this technician
+      const techPurchasePayments = allPurchasePayments?.filter((pay: any) => pay.purchases?.technician_id === tech.id) || [];
+      const totalPurchasesPaid = techPurchasePayments.reduce((acc: number, pay: any) => acc + Number(pay.amount || 0), 0);
+
+      const totalWithdrawn = totalExpensesPaid + totalPurchasesPaid;
 
       // Get last work (most recent progress record)
       const lastWork = techProgress[0];
@@ -187,7 +235,7 @@ const Technicians = () => {
     });
 
     return statsMap;
-  }, [technicians, allProgressRecords, allTechnicianRates, allExpenses]);
+  }, [technicians, allProgressRecords, allTechnicianRates, allExpenses, allPurchases, allPurchasePayments]);
 
   const saveMutation = useMutation({
     mutationFn: async (data: TechnicianForm) => {

@@ -222,7 +222,7 @@ const ProjectExpenses = () => {
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      const { error } = await supabase
+      const { data: insertedExp, error } = await supabase
         .from("expenses")
         .insert({
           project_id: projectId,
@@ -235,9 +235,26 @@ const ProjectExpenses = () => {
           date: data.date,
           notes: data.notes || null,
           treasury_id: data.treasury_id || null,
-        });
+        })
+        .select("id")
+        .single();
       
       if (error) throw error;
+
+      if (data.treasury_id && insertedExp) {
+        await supabase.from("treasury_transactions").insert({
+          treasury_id: data.treasury_id,
+          type: "withdrawal",
+          amount: parseFloat(data.amount),
+          balance_after: 0,
+          description: `مصروف: ${data.description}`,
+          date: data.date,
+          source: "expense",
+          reference_type: "expense",
+          reference_id: insertedExp.id,
+          notes: data.notes || null,
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-expenses", projectId] });
@@ -558,8 +575,8 @@ const ProjectExpenses = () => {
                         if (children.length === 0) return null;
                         return (
                           <SelectGroup key={parent.id}>
-                            <SelectLabel className="font-bold text-primary border-b border-border/40 pb-1 mb-1 mt-2 text-xs">
-                              💰 {parent.name}
+                            <SelectLabel className="font-bold text-primary border-b border-border/40 pb-1 mb-1 mt-2 text-xs flex items-center gap-1">
+                              <Wallet className="h-3.5 w-3.5 text-primary inline" /> {parent.name}
                             </SelectLabel>
                             {children.map((child) => (
                               <SelectItem key={child.id} value={child.id} className="pr-6">

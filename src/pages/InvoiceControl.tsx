@@ -366,7 +366,36 @@ export default function InvoiceControl() {
                   const Icon = st.icon;
                   return (
                     <TableRow key={p.id} className={p.status === "due" ? "bg-destructive/5" : ""}>
-                      <TableCell className="font-medium">{p.suppliers?.name || "—"}</TableCell>
+                      <TableCell className="font-medium">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {p.suppliers?.name ? (
+                              <span className="font-semibold text-foreground">{p.suppliers.name}</span>
+                            ) : p.title ? (
+                              <span className="font-semibold text-foreground">{p.title}</span>
+                            ) : p.notes ? (
+                              <span className="font-semibold text-foreground">{p.notes}</span>
+                            ) : (
+                              <span className="text-muted-foreground italic">مورد غير محدد</span>
+                            )}
+                            {!p.suppliers?.name && (
+                              <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4 bg-muted/50 text-muted-foreground border-muted-foreground/30 font-normal">
+                                بدون مورد
+                              </Badge>
+                            )}
+                          </div>
+                          {p.suppliers?.name && (p.title || p.notes) && (
+                            <p className="text-xs text-muted-foreground truncate max-w-[200px]" title={p.title || p.notes}>
+                              {p.title || p.notes}
+                            </p>
+                          )}
+                          {!p.suppliers?.name && p.title && p.notes && p.title !== p.notes && (
+                            <p className="text-xs text-muted-foreground truncate max-w-[200px]" title={p.notes}>
+                              {p.notes}
+                            </p>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>{p.projects?.name || "—"}</TableCell>
                       <TableCell className="font-mono text-sm">{p.invoice_number || "—"}</TableCell>
                       <TableCell className="text-sm">{format(parseISO(p.date), "dd/MM/yyyy", { locale: ar })}</TableCell>
@@ -484,10 +513,18 @@ export default function InvoiceControl() {
               <Select value={form.status} onValueChange={(v) => setForm(f => ({ ...f, status: v }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="paid">✅ مدفوع</SelectItem>
-                  <SelectItem value="due">❌ مستحق</SelectItem>
-                  <SelectItem value="partial">🕐 مدفوع جزئياً</SelectItem>
-                  <SelectItem value="processing">⏳ قيد المعالجة</SelectItem>
+                  <SelectItem value="paid">
+                    <span className="flex items-center gap-1.5"><CheckCircle className="h-3.5 w-3.5 text-emerald-600 inline" /> مدفوع</span>
+                  </SelectItem>
+                  <SelectItem value="due">
+                    <span className="flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-red-600 inline" /> مستحق</span>
+                  </SelectItem>
+                  <SelectItem value="partial">
+                    <span className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-amber-500 inline" /> مدفوع جزئياً</span>
+                  </SelectItem>
+                  <SelectItem value="processing">
+                    <span className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-blue-500 inline" /> قيد المعالجة</span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>

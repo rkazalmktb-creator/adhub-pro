@@ -155,12 +155,42 @@ const ProjectProgress = () => {
   // Save progress record mutation
   const saveProgressMutation = useMutation({
     mutationFn: async (data: typeof progressFormData) => {
+      const qty = parseFloat(data.quantity_completed) || 0;
+
+      // 1. Try to get assigned rate for this item & technician
+      let rate = 0;
+      const { data: itemTech } = await supabase
+        .from("project_item_technicians")
+        .select("rate")
+        .eq("project_item_id", selectedItem!.id)
+        .eq("technician_id", data.technician_id)
+        .maybeSingle();
+
+      if (itemTech && itemTech.rate) {
+        rate = Number(itemTech.rate);
+      } else {
+        // Fallback to technician default rates
+        const { data: tech } = await supabase
+          .from("technicians")
+          .select("meter_rate, piece_rate, daily_rate, hourly_rate")
+          .eq("id", data.technician_id)
+          .maybeSingle();
+
+        if (tech) {
+          rate = Number(tech.meter_rate || tech.piece_rate || tech.daily_rate || tech.hourly_rate || 0);
+        }
+      }
+
+      const earnedAmount = qty * rate;
+
       const { error } = await supabase
         .from("technician_progress_records")
         .insert({
           project_item_id: selectedItem!.id,
           technician_id: data.technician_id,
-          quantity_completed: parseFloat(data.quantity_completed) || 0,
+          quantity_completed: qty,
+          rate: rate,
+          earned_amount: earnedAmount,
           date: data.date,
           notes: data.notes || null,
         });

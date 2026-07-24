@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowRight, ArrowLeft, Plus, Pencil, Trash2, Ruler, Square, Box, Download, Package, Search, Filter, User, Calculator, Users, X, Copy, ArrowRightLeft, CheckSquare, Layers, Info } from "lucide-react";
+import { ArrowRight, ArrowLeft, Plus, Pencil, Trash2, Ruler, Square, Box, Download, Package, Search, Filter, User, Calculator, Users, X, Copy, ArrowRightLeft, CheckSquare, Layers, Info, AlertTriangle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import type { Json } from "@/integrations/supabase/types";
 
@@ -254,7 +254,9 @@ const ProjectItems = () => {
           *,
           engineers (id, name, engineer_type),
           measurement_configs (id, name, unit_symbol),
-          project_item_technicians (total_cost)
+          project_item_technicians (total_cost),
+          purchases (id, total_amount),
+          technician_progress_records (id, quantity_completed, rate, earned_amount)
         `)
         .eq("project_id", projectId!)
         .order("created_at", { ascending: false });
@@ -266,17 +268,26 @@ const ProjectItems = () => {
       const { data, error } = await query;
       if (error) throw error;
       
-      // Calculate technician costs for each item, fix total_price if 0
       return data.map((item: any) => {
         const rawTotal = item.total_price;
         const effectiveTotal = rawTotal || (item.quantity * item.unit_price);
+        const assignedTechCost = item.project_item_technicians?.reduce((sum: number, t: any) => sum + Number(t.total_cost || 0), 0) || 0;
+        const progressTechCost = item.technician_progress_records?.reduce((sum: number, r: any) => {
+          const earned = Number(r.earned_amount || 0);
+          return sum + (earned > 0 ? earned : (Number(r.quantity_completed || 0) * Number(r.rate || 0)));
+        }, 0) || 0;
+
+        const technicianCost = Math.max(assignedTechCost, progressTechCost);
+        const purchasesCost = item.purchases?.reduce((sum: number, p: any) => sum + Number(p.total_amount || 0), 0) || 0;
+
         return {
           ...item,
           total_price: effectiveTotal,
           _raw_total_price: rawTotal,
-          technician_cost: item.project_item_technicians?.reduce((sum: number, t: any) => sum + Number(t.total_cost || 0), 0) || 0,
+          technician_cost: technicianCost,
+          purchases_cost: purchasesCost,
         };
-      }) as (ProjectItem & { technician_cost: number; _raw_total_price: number })[];
+      }) as (ProjectItem & { technician_cost: number; purchases_cost: number; _raw_total_price: number })[];
     },
     enabled: !!projectId,
   });
@@ -618,6 +629,9 @@ const ProjectItems = () => {
           quantity: customData ? parseFloat(customData.quantity) || 0 : 0,
           unit_price: customData ? parseFloat(customData.unit_price) || item.default_unit_price : item.default_unit_price,
           notes: item.notes,
+          measurement_factor: (item as any).measurement_factor !== null && (item as any).measurement_factor !== undefined ? Number((item as any).measurement_factor) : 1,
+          formula: item.formula,
+          measurement_config_id: item.measurement_config_id,
         };
       });
 
@@ -867,7 +881,8 @@ const ProjectItems = () => {
 
   const totalAmount = items?.reduce((sum, item) => sum + (item.total_price || 0), 0) || 0;
   const totalTechnicianCost = items?.reduce((sum, item) => sum + (item.technician_cost || 0), 0) || 0;
-  const totalNet = totalAmount - totalTechnicianCost;
+  const totalPurchasesCost = items?.reduce((sum, item) => sum + ((item as any).purchases_cost || 0), 0) || 0;
+  const totalNet = totalAmount - (totalTechnicianCost + totalPurchasesCost);
 
   if (projectLoading || itemsLoading) {
     return (
@@ -1066,6 +1081,7 @@ const ProjectItems = () => {
                   <TableHead className="text-right">الكمية</TableHead>
                   <TableHead className="text-right">سعر الوحدة</TableHead>
                   <TableHead className="text-right">الإجمالي</TableHead>
+                  <TableHead className="text-right">المشتريات</TableHead>
                   <TableHead className="text-right">تكلفة الفنيين</TableHead>
                   <TableHead className="text-right">الصافي</TableHead>
                   <TableHead className="text-right">الإجراءات</TableHead>
@@ -1073,7 +1089,8 @@ const ProjectItems = () => {
               </TableHeader>
               <TableBody>
                 {items && items.map((item) => {
-                  const itemNet = (item.total_price || 0) - (item.technician_cost || 0);
+                  const pCost = (item as any).purchases_cost || 0;
+                  const itemNet = (item.total_price || 0) - ((item.technician_cost || 0) + pCost);
                   const isSelected = selectedItemIds.includes(item.id);
                   return (
                   <TableRow key={item.id} className={isSelected ? "bg-muted/50" : ""}>
@@ -1120,6 +1137,9 @@ const ProjectItems = () => {
                     <TableCell>{item.unit_price.toLocaleString()} د.ل</TableCell>
                     <TableCell className="font-bold">
                       {item.total_price.toLocaleString()} د.ل
+                    </TableCell>
+                    <TableCell className="text-blue-600 font-medium">
+                      {pCost.toLocaleString()} د.ل
                     </TableCell>
                     <TableCell className="text-orange-600">
                       {item.technician_cost.toLocaleString()} د.ل
@@ -1306,6 +1326,11 @@ const ProjectItems = () => {
                         {item.category && (
                           <Badge variant="outline" className="mt-1 text-xs">
                             {item.category}
+                          </Badge>
+                        )}
+                        {(item as any).measurement_factor !== undefined && (item as any).measurement_factor !== null && Number((item as any).measurement_factor) !== 1 && (
+                          <Badge variant="outline" className="mt-1 mr-1 text-xs border-orange-500/30 text-orange-500 bg-orange-500/5 font-semibold">
+                            معامل التكعيب: {(item as any).measurement_factor}
                           </Badge>
                         )}
                       </div>
@@ -1711,8 +1736,9 @@ const ProjectItems = () => {
                 <div className="bg-muted p-3 rounded-lg space-y-2 text-sm">
                   <p className="font-medium text-foreground">تأثير الحذف على المشروع:</p>
                   {items && items.length === 1 ? (
-                    <p className="text-orange-600">
-                      ⚠️ هذا هو البند الأخير - سيصبح تقدم المشروع <strong>0%</strong>
+                    <p className="text-orange-600 flex items-center gap-1.5">
+                      <AlertTriangle className="h-4 w-4 shrink-0 inline text-amber-500" />
+                      <span>هذا هو البند الأخير - سيصبح تقدم المشروع <strong>0%</strong></span>
                     </p>
                   ) : items && items.length > 1 ? (
                     <p>
@@ -1720,8 +1746,9 @@ const ProjectItems = () => {
                     </p>
                   ) : null}
                   {(itemToDelete.technician_cost || 0) > 0 && (
-                    <p className="text-orange-600">
-                      ⚠️ يوجد فنيين معينين على هذا البند بتكلفة إجمالية
+                    <p className="text-orange-600 flex items-center gap-1.5">
+                      <AlertTriangle className="h-4 w-4 shrink-0 inline text-amber-500" />
+                      <span>يوجد فنيين معينين على هذا البند بتكلفة إجمالية</span>
                     </p>
                   )}
                 </div>

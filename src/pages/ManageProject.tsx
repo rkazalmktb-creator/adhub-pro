@@ -356,7 +356,7 @@ const ManageProject = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
-      toast({ title: "تم بنجاح ✨", description: "تم إضافة المشروع بنجاح" });
+      toast({ title: "تم بنجاح", description: "تم إضافة المشروع بنجاح" });
       navigate(getReturnPath());
     },
     onError: (error: any) => {
@@ -391,7 +391,7 @@ const ManageProject = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       queryClient.invalidateQueries({ queryKey: ["project", id] });
-      toast({ title: "تم التحديث ✨", description: "تم تحديث المشروع بنجاح" });
+      toast({ title: "تم التحديث", description: "تم تحديث المشروع بنجاح" });
       navigate(getReturnPath());
     },
     onError: (error: any) => {

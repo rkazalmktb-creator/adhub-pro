@@ -27,6 +27,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
   CreditCard,
   Users,
   Building2,
@@ -41,6 +49,8 @@ import {
   ChevronUp,
   Printer,
   Search,
+  Pencil,
+  Sparkles,
 } from "lucide-react";
 import { formatCurrencyLYD } from "@/lib/currency";
 import { format } from "date-fns";
@@ -67,6 +77,8 @@ const ClientPayments = () => {
   const [paymentDate, setPaymentDate] = useState(today());
   const [selectedTreasuryId, setSelectedTreasuryId] = useState("");
   const [selectedParentTreasuryId, setSelectedParentTreasuryId] = useState("");
+  const [paymentProjectType, setPaymentProjectType] = useState<"all" | "contracting" | "finishing">("all");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [notes, setNotes] = useState("");
 
   // ── search / audit state ────────────────────────────────────────────────
@@ -122,7 +134,7 @@ const ClientPayments = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("client_payments")
-        .select("*, clients:client_id(name), projects:project_id(name)")
+        .select("*, clients:client_id(name), projects:project_id(name, project_type)")
         .order("date", { ascending: false });
       if (error) throw error;
       return data;
@@ -138,7 +150,7 @@ const ClientPayments = () => {
       // 1. Get all projects for this client
       const { data: projects, error: projErr } = await supabase
         .from("projects")
-        .select("id, name")
+        .select("id, name, project_type")
         .eq("client_id", selectedClientId)
         .order("name");
       if (projErr) throw projErr;
@@ -300,8 +312,39 @@ const ClientPayments = () => {
 
   // ── computed ────────────────────────────────────────────────────────────
   const amount = parseFloat(paymentAmount) || 0;
-  const totalOutstanding = clientSummary?.totalOutstanding ?? 0;
-  const totalPaid = clientSummary?.totalPaid ?? 0;
+
+  const filteredProjectsForPayment = useMemo(() => {
+    if (!clientSummary?.projects) return [];
+    if (paymentProjectType === "all") return clientSummary.projects;
+    return clientSummary.projects.filter(p => (p as any).project_type === paymentProjectType);
+  }, [clientSummary?.projects, paymentProjectType]);
+
+  const contractingProjects = useMemo(() => {
+    return clientSummary?.projects.filter(p => (p as any).project_type === "contracting") || [];
+  }, [clientSummary?.projects]);
+
+  const finishingProjects = useMemo(() => {
+    return clientSummary?.projects.filter(p => (p as any).project_type === "finishing") || [];
+  }, [clientSummary?.projects]);
+
+  const totalOutstanding = useMemo(() => {
+    if (!clientSummary?.projects) return 0;
+    if (selectedProjectId && selectedProjectId !== "none") {
+      const targetProj = clientSummary.projects.find(p => p.id === selectedProjectId);
+      return targetProj ? targetProj.outstanding : 0;
+    }
+    return filteredProjectsForPayment.reduce((sum, p) => sum + (p.outstanding || 0), 0);
+  }, [clientSummary?.projects, selectedProjectId, filteredProjectsForPayment]);
+
+  const totalPaid = useMemo(() => {
+    if (!clientSummary?.projects) return 0;
+    if (selectedProjectId && selectedProjectId !== "none") {
+      const targetProj = clientSummary.projects.find(p => p.id === selectedProjectId);
+      return targetProj ? targetProj.paid : 0;
+    }
+    return filteredProjectsForPayment.reduce((sum, p) => sum + (p.paid || 0), 0);
+  }, [clientSummary?.projects, selectedProjectId, filteredProjectsForPayment]);
+
   const remaining = totalOutstanding - amount;
   const isSurplus = amount > totalOutstanding && totalOutstanding > 0;
   const surplus = isSurplus ? amount - totalOutstanding : 0;
@@ -348,12 +391,14 @@ const ClientPayments = () => {
         throw new Error("يجب اختيار الزبون والخزينة وإدخال المبلغ");
       }
 
+      const targetProjId = selectedProjectId && selectedProjectId !== "none" ? selectedProjectId : null;
+
       // 1. Insert Client Payment record
       const { data: payment, error: payErr } = await supabase
         .from("client_payments")
         .insert({
           client_id: selectedClientId,
-          project_id: null, // Null indicates a general payment/credit, DB trigger handles auto-allocation
+          project_id: targetProjId,
           amount: amount,
           date: paymentDate,
           payment_method: paymentMethod,
@@ -366,28 +411,47 @@ const ClientPayments = () => {
 
       // 2. Log Income record
       await supabase.from("income").insert({
-        project_id: null,
+        project_id: targetProjId,
         client_id: selectedClientId,
         amount: amount,
         date: paymentDate,
         type: "service",
         subtype: "client_payment",
         payment_method: paymentMethod,
-        notes: notes || `تسديد دفعة عامة (رصيد زبون)`,
+        notes: notes || (targetProjId ? `تسديد دفعة لمشروع` : `تسديد دفعة عامة (رصيد زبون)`),
         status: "received",
         reference_id: payment.id,
+      });
+
+      // 3. Log Treasury Transaction
+      const clientObj = clients?.find((c) => c.id === selectedClientId);
+      await supabase.from("treasury_transactions").insert({
+        treasury_id: selectedTreasuryId,
+        type: "deposit",
+        amount: amount,
+        balance_after: 0,
+        description: `تسديد من الزبون: ${clientObj?.name || ""}`,
+        date: paymentDate,
+        source: "client_payment",
+        reference_type: "client_payment",
+        reference_id: payment.id,
+        notes: notes || null,
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["client-outstanding", selectedClientId] });
       queryClient.invalidateQueries({ queryKey: ["projects-payments-total"] });
       queryClient.invalidateQueries({ queryKey: ["treasuries-active"] });
+      queryClient.invalidateQueries({ queryKey: ["treasuries"] });
+      queryClient.invalidateQueries({ queryKey: ["treasury_transactions"] });
       queryClient.invalidateQueries({ queryKey: ["client-payments-all-list"] });
       toast({ title: "تم تسجيل التسديد بنجاح" });
       setPaymentAmount("");
       setNotes("");
       setSelectedParentTreasuryId("");
       setSelectedTreasuryId("");
+      setPaymentProjectType("all");
+      setSelectedProjectId("");
     },
     onError: (err: any) => {
       toast({ title: "خطأ", description: err.message, variant: "destructive" });
@@ -423,8 +487,11 @@ const ClientPayments = () => {
         }
       }
 
-      // Delete the income transaction associated
+      // Delete associated income transaction
       await supabase.from("income").delete().eq("reference_id", paymentId);
+
+      // Delete associated treasury transaction
+      await supabase.from("treasury_transactions").delete().eq("reference_id", paymentId);
 
       // Delete payment (cascade will handle allocations)
       const { error } = await supabase.from("client_payments").delete().eq("id", paymentId);
@@ -434,6 +501,8 @@ const ClientPayments = () => {
       queryClient.invalidateQueries({ queryKey: ["client-outstanding", selectedClientId] });
       queryClient.invalidateQueries({ queryKey: ["projects-payments-total"] });
       queryClient.invalidateQueries({ queryKey: ["treasuries-active"] });
+      queryClient.invalidateQueries({ queryKey: ["treasuries"] });
+      queryClient.invalidateQueries({ queryKey: ["treasury_transactions"] });
       queryClient.invalidateQueries({ queryKey: ["client-payments-all-list"] });
       toast({ title: "تم حذف التسديد" });
       setDeleteId(null);
@@ -442,6 +511,91 @@ const ClientPayments = () => {
       toast({ title: "خطأ", description: err.message, variant: "destructive" });
     },
   });
+
+  const [editingClientPayment, setEditingClientPayment] = useState<any | null>(null);
+  const [editClientPayDialogOpen, setEditClientPayDialogOpen] = useState(false);
+  const [editClientPayFormData, setEditClientPayFormData] = useState({
+    amount: "",
+    date: new Date().toISOString().split("T")[0],
+    payment_method: "cash",
+    treasury_id: "",
+    notes: "",
+  });
+
+  const updateClientPaymentMutation = useMutation({
+    mutationFn: async (data: typeof editClientPayFormData) => {
+      if (!editingClientPayment) return;
+      const amountVal = parseFloat(data.amount);
+      if (isNaN(amountVal) || amountVal <= 0) {
+        throw new Error("يرجى إدخال مبلغ صحيح");
+      }
+
+      // Update client_payments
+      const { error } = await supabase
+        .from("client_payments")
+        .update({
+          amount: amountVal,
+          date: data.date,
+          payment_method: data.payment_method,
+          treasury_id: data.treasury_id,
+          notes: data.notes || null,
+        })
+        .eq("id", editingClientPayment.id);
+
+      if (error) throw error;
+
+      // Update associated income
+      await supabase
+        .from("income")
+        .update({
+          amount: amountVal,
+          date: data.date,
+          payment_method: data.payment_method,
+          notes: data.notes || null,
+        })
+        .eq("reference_id", editingClientPayment.id);
+
+      // Update associated treasury_transaction
+      if (data.treasury_id) {
+        const { error: txErr } = await supabase
+          .from("treasury_transactions")
+          .update({
+            treasury_id: data.treasury_id,
+            amount: amountVal,
+            date: data.date,
+            notes: data.notes || null,
+          })
+          .eq("reference_id", editingClientPayment.id);
+        if (txErr) console.error("Error updating treasury tx:", txErr);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["client-outstanding", selectedClientId] });
+      queryClient.invalidateQueries({ queryKey: ["projects-payments-total"] });
+      queryClient.invalidateQueries({ queryKey: ["treasuries-active"] });
+      queryClient.invalidateQueries({ queryKey: ["treasuries"] });
+      queryClient.invalidateQueries({ queryKey: ["treasury_transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["client-payments-all-list"] });
+      toast({ title: "تم تحديث التسديد بنجاح" });
+      setEditClientPayDialogOpen(false);
+      setEditingClientPayment(null);
+    },
+    onError: (err: any) => {
+      toast({ title: "خطأ في التحديث", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleOpenEditClientPayment = (payment: any) => {
+    setEditingClientPayment(payment);
+    setEditClientPayFormData({
+      amount: (payment.amount || 0).toString(),
+      date: payment.date ? payment.date.split("T")[0] : new Date().toISOString().split("T")[0],
+      payment_method: payment.payment_method || "cash",
+      treasury_id: payment.treasury_id || "",
+      notes: payment.notes || "",
+    });
+    setEditClientPayDialogOpen(true);
+  };
 
   // ── printing logic ───────────────────────────────────────────────────────
   const handlePrint = async (payment: any) => {
@@ -628,7 +782,7 @@ const ClientPayments = () => {
                     </Button>
                   )}
                 </div>
-                <Select value={selectedClientId} onValueChange={v => { setSelectedClientId(v); setPaymentAmount(""); }} dir="rtl">
+                <Select value={selectedClientId} onValueChange={v => { setSelectedClientId(v); setPaymentAmount(""); setSelectedProjectId(""); setPaymentProjectType("all"); }} dir="rtl">
                   <SelectTrigger className="h-11 rounded-xl border-primary/20 focus:border-primary text-base">
                     <SelectValue placeholder="اختر الزبون..." />
                   </SelectTrigger>
@@ -639,6 +793,59 @@ const ClientPayments = () => {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Project type + Target project selector */}
+              {selectedClientId && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold flex items-center gap-1.5">
+                      <Building2 className="h-3.5 w-3.5 text-primary" />
+                      نوع المشروع
+                    </Label>
+                    <Select
+                      value={paymentProjectType}
+                      onValueChange={(val: any) => {
+                        setPaymentProjectType(val);
+                        setSelectedProjectId("");
+                      }}
+                      dir="rtl"
+                    >
+                      <SelectTrigger className="h-10 rounded-xl border-primary/20 focus:border-primary">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">عام / الكل</SelectItem>
+                        <SelectItem value="contracting">مقاولات</SelectItem>
+                        <SelectItem value="finishing">تشطيبات</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold flex items-center gap-1.5">
+                      <Building2 className="h-3.5 w-3.5 text-primary" />
+                      المشروع المستهدف
+                    </Label>
+                    <Select
+                      value={selectedProjectId}
+                      onValueChange={setSelectedProjectId}
+                      dir="rtl"
+                    >
+                      <SelectTrigger className="h-10 rounded-xl border-primary/20 focus:border-primary">
+                        <SelectValue placeholder={paymentProjectType === "all" ? "اختر مشروعاً (اختياري)..." : "اختر المشروع..."} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">بدون مشروع (رصيد عام)</SelectItem>
+                        {filteredProjectsForPayment.map(p => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name} ({p.project_type === "contracting" ? "مقاولات" : "تشطيبات"})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
 
               {/* Outstanding summary (shows after client is selected) */}
               {selectedClientId && !summaryLoading && clientSummary && (
@@ -870,7 +1077,9 @@ const ClientPayments = () => {
                   </div>
                 ) : filteredAllPayments.map(p => {
                   const clientName = (p as any).clients?.name || "بدون عميل";
-                  const projectName = (p as any).projects?.name || "رصيد عام للزبون";
+                  const projObj = (p as any).projects;
+                  const projTypeStr = projObj?.project_type === "contracting" ? "مقاولات" : projObj?.project_type === "finishing" ? "تشطيب" : "";
+                  const projectName = projObj?.name ? `${projObj.name}${projTypeStr ? ` (${projTypeStr})` : ''}` : "رصيد عام للزبون";
                   const treasury = treasuries?.find(t => t.id === p.treasury_id);
                   const isExpanded = expandedIds.has(p.id);
 
@@ -893,6 +1102,15 @@ const ClientPayments = () => {
                             </p>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0 mr-2" onClick={e => e.stopPropagation()}>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-blue-600 hover:bg-blue-50 rounded-lg"
+                              onClick={() => handleOpenEditClientPayment(p)}
+                              title="تعديل التسديد"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
                             <Button
                               variant="ghost"
                               size="icon"
@@ -938,43 +1156,146 @@ const ClientPayments = () => {
             </Card>
           ) : (
             <>
-              {/* Projects breakdown */}
+              {/* Projects breakdown separated by Contracting & Finishing */}
               <Card className="border-border/50 shadow-sm">
-                <CardHeader className="pb-2 border-b border-border/30 flex flex-row items-center justify-between">
+                <CardHeader className="pb-3 border-b border-border/30 flex flex-row items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Building2 className="h-4 w-4 text-primary" />
                     <h3 className="font-bold text-sm">مشاريع {selectedClient?.name}</h3>
                   </div>
-                  <Badge variant="secondary" className="text-xs">{clientSummary?.projects.length || 0}</Badge>
+                  <div className="flex items-center gap-1.5">
+                    {contractingProjects.length > 0 && (
+                      <Badge variant="outline" className="text-[10px] bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400">
+                        {contractingProjects.length} مقاولات
+                      </Badge>
+                    )}
+                    {finishingProjects.length > 0 && (
+                      <Badge variant="outline" className="text-[10px] bg-purple-500/10 border-purple-500/20 text-purple-700 dark:text-purple-400">
+                        {finishingProjects.length} تشطيبات
+                      </Badge>
+                    )}
+                  </div>
                 </CardHeader>
-                <CardContent className="p-3 space-y-2">
+                <CardContent className="p-3 space-y-4">
                   {clientSummary?.projects.length === 0 ? (
-                    <p className="text-xs text-muted-foreground text-center py-3">لا توجد مشاريع للزبون حالياً</p>
-                  ) : clientSummary?.projects.map(proj => (
-                    <div
-                      key={proj.id}
-                      className="flex items-center justify-between p-2.5 rounded-lg bg-muted/40 hover:bg-accent/50 cursor-pointer transition-colors group"
-                      onClick={() => navigate(`/projects/${proj.id}/phases`)}
-                    >
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold truncate group-hover:text-primary transition-colors">{proj.name}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          سدّد: <span className="text-primary">{formatCurrencyLYD(proj.paid)}</span>
-                        </p>
-                      </div>
-                      <div className="text-left shrink-0">
-                        {proj.outstanding > 0 ? (
-                          <Badge variant="outline" className="text-[10px] text-destructive border-destructive/30 bg-destructive/5 font-semibold">
-                            متبقي: {formatCurrencyLYD(proj.outstanding)}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[10px] text-green-600 border-green-500/30 bg-green-500/5 font-semibold">
-                            مسدّد بالكامل
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    <p className="text-xs text-muted-foreground text-center py-4">لا توجد مشاريع للزبون حالياً</p>
+                  ) : (
+                    <>
+                      {/* Section 1: Contracting Projects */}
+                      {(paymentProjectType === "all" || paymentProjectType === "contracting") && contractingProjects.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-xs font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                              <Building2 className="h-3.5 w-3.5" />
+                              مشاريع المقاولات ({contractingProjects.length})
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">
+                              متبقي: {formatCurrencyLYD(contractingProjects.reduce((s, p) => s + p.outstanding, 0))}
+                            </span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {contractingProjects.map(proj => {
+                              const isSelected = selectedProjectId === proj.id;
+                              return (
+                                <div
+                                  key={proj.id}
+                                  onClick={() => {
+                                    setSelectedProjectId(proj.id);
+                                    setPaymentProjectType("contracting");
+                                  }}
+                                  className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer ${
+                                    isSelected
+                                      ? "border-amber-500 bg-amber-500/10 shadow-sm"
+                                      : "border-border/40 bg-muted/30 hover:bg-accent/50 hover:border-amber-500/30"
+                                  }`}
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-xs font-bold truncate text-foreground">{proj.name}</p>
+                                      <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400 shrink-0">
+                                        مقاولات
+                                      </Badge>
+                                    </div>
+                                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                                      سدّد: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrencyLYD(proj.paid)}</span>
+                                    </p>
+                                  </div>
+                                  <div className="text-left shrink-0 mr-2">
+                                    {proj.outstanding > 0 ? (
+                                      <Badge variant="outline" className="text-[10px] text-destructive border-destructive/30 bg-destructive/5 font-semibold">
+                                        متبقي: {formatCurrencyLYD(proj.outstanding)}
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30 bg-emerald-500/5 font-semibold">
+                                        مسدّد بالكامل
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Section 2: Finishing Projects */}
+                      {(paymentProjectType === "all" || paymentProjectType === "finishing") && finishingProjects.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-xs font-bold text-purple-700 dark:text-purple-400 flex items-center gap-1.5">
+                              <Sparkles className="h-3.5 w-3.5" />
+                              مشاريع التشطيبات ({finishingProjects.length})
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">
+                              متبقي: {formatCurrencyLYD(finishingProjects.reduce((s, p) => s + p.outstanding, 0))}
+                            </span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {finishingProjects.map(proj => {
+                              const isSelected = selectedProjectId === proj.id;
+                              return (
+                                <div
+                                  key={proj.id}
+                                  onClick={() => {
+                                    setSelectedProjectId(proj.id);
+                                    setPaymentProjectType("finishing");
+                                  }}
+                                  className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer ${
+                                    isSelected
+                                      ? "border-purple-500 bg-purple-500/10 shadow-sm"
+                                      : "border-border/40 bg-muted/30 hover:bg-accent/50 hover:border-purple-500/30"
+                                  }`}
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-xs font-bold truncate text-foreground">{proj.name}</p>
+                                      <Badge variant="outline" className="text-[9px] px-1 py-0 bg-purple-500/10 border-purple-500/20 text-purple-700 dark:text-purple-400 shrink-0">
+                                        تشطيبات
+                                      </Badge>
+                                    </div>
+                                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                                      سدّد: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrencyLYD(proj.paid)}</span>
+                                    </p>
+                                  </div>
+                                  <div className="text-left shrink-0 mr-2">
+                                    {proj.outstanding > 0 ? (
+                                      <Badge variant="outline" className="text-[10px] text-destructive border-destructive/30 bg-destructive/5 font-semibold">
+                                        متبقي: {formatCurrencyLYD(proj.outstanding)}
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30 bg-emerald-500/5 font-semibold">
+                                        مسدّد بالكامل
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </CardContent>
               </Card>
 
@@ -1010,6 +1331,15 @@ const ClientPayments = () => {
                               </p>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0 mr-2" onClick={e => e.stopPropagation()}>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-blue-600 hover:bg-blue-50 rounded-lg"
+                                onClick={() => handleOpenEditClientPayment(p)}
+                                title="تعديل التسديد"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -1071,6 +1401,94 @@ const ClientPayments = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Edit Client Payment Dialog */}
+      <Dialog open={editClientPayDialogOpen} onOpenChange={setEditClientPayDialogOpen}>
+        <DialogContent className="sm:max-w-[450px]" dir="rtl">
+          <DialogHeader>
+            <DialogTitle>تعديل بيانات تسديد الزبون</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit_cp_amount">مبلغ التسديد (د.ل) *</Label>
+              <Input
+                id="edit_cp_amount"
+                type="number"
+                step="0.001"
+                placeholder="أدخل المبلغ"
+                value={editClientPayFormData.amount}
+                onChange={(e) => setEditClientPayFormData({ ...editClientPayFormData, amount: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit_cp_date">تاريخ التسديد *</Label>
+              <Input
+                id="edit_cp_date"
+                type="date"
+                value={editClientPayFormData.date}
+                onChange={(e) => setEditClientPayFormData({ ...editClientPayFormData, date: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit_cp_method">طريقة الدفع *</Label>
+              <select
+                id="edit_cp_method"
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={editClientPayFormData.payment_method}
+                onChange={(e) => setEditClientPayFormData({ ...editClientPayFormData, payment_method: e.target.value })}
+              >
+                <option value="cash">نقداً (كاش)</option>
+                <option value="check">صك بنكي (شيك)</option>
+                <option value="transfer">تحويل بنكي</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit_cp_treasury">الخزينة المودع فيها *</Label>
+              <select
+                id="edit_cp_treasury"
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={editClientPayFormData.treasury_id}
+                onChange={(e) => setEditClientPayFormData({ ...editClientPayFormData, treasury_id: e.target.value })}
+              >
+                <option value="">اختر الخزينة...</option>
+                {treasuries?.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit_cp_notes">ملاحظات</Label>
+              <Textarea
+                id="edit_cp_notes"
+                placeholder="أدخل ملاحظات"
+                value={editClientPayFormData.notes}
+                onChange={(e) => setEditClientPayFormData({ ...editClientPayFormData, notes: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setEditClientPayDialogOpen(false)}
+              disabled={updateClientPaymentMutation.isPending}
+            >
+              إلغاء
+            </Button>
+            <Button
+              onClick={() => updateClientPaymentMutation.mutate(editClientPayFormData)}
+              disabled={updateClientPaymentMutation.isPending || !editClientPayFormData.amount || !editClientPayFormData.treasury_id}
+            >
+              {updateClientPaymentMutation.isPending ? "جاري الحفظ..." : "حفظ التعديلات"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -1,6 +1,6 @@
 import React from "react";
 import { 
-  Plus, Pencil, X, Search, Tag, User, Users, Ruler, Layers, Calculator, Info, Coins, TrendingUp, Percent, ChevronDown 
+  Plus, Pencil, X, Search, Tag, User, Users, Ruler, Layers, Calculator, Info, Coins, TrendingUp, Percent, ChevronDown, CheckCircle2, AlertTriangle 
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -324,7 +324,7 @@ export const InvoiceItemForm: React.FC<InvoiceItemFormProps> = ({
                                 unit_price: gi.default_unit_price.toString(),
                                 measurement_config_id: gi.measurement_config_id || "",
                                 component_values: {},
-                                measurement_factor: "1",
+                                measurement_factor: (gi as any).measurement_factor?.toString() || "1",
                               }));
                               setCalculationMethod(gi.measurement_config_id ? "config" : "manual");
                               setInlineSearch("");
@@ -338,6 +338,11 @@ export const InvoiceItemForm: React.FC<InvoiceItemFormProps> = ({
                               )}
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
+                              {(gi as any).measurement_factor !== undefined && (gi as any).measurement_factor !== null && Number((gi as any).measurement_factor) !== 1 && (
+                                <Badge variant="outline" className="text-[10px] border-orange-500/30 text-orange-500 bg-orange-500/5 font-semibold rounded-md">
+                                  معامل: {(gi as any).measurement_factor}
+                                </Badge>
+                              )}
                               {gi.category && (
                                 <Badge variant="secondary" className="text-[10px] px-2 py-0.5 bg-muted text-muted-foreground font-medium rounded-md">
                                   {gi.category}
@@ -746,11 +751,11 @@ export const InvoiceItemForm: React.FC<InvoiceItemFormProps> = ({
                                 <div className="flex items-center gap-1.5 text-xs">
                                   {formulaIsValid ? (
                                     <span className="text-emerald-600 font-bold flex items-center gap-1">
-                                      ✓ صيغة المعادلة صالحة
+                                       <CheckCircle2 className="h-3.5 w-3.5 inline text-emerald-600" /> صيغة المعادلة صالحة
                                     </span>
                                   ) : (
                                     <span className="text-destructive font-bold flex items-center gap-1">
-                                      ⚠ {formulaError || "تنبيه: صيغة المعادلة غير صالحة."}
+                                      <AlertTriangle className="h-3.5 w-3.5 inline text-destructive" /> {formulaError || "تنبيه: صيغة المعادلة غير صالحة."}
                                     </span>
                                   )}
                                 </div>

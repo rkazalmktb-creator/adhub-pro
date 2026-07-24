@@ -16,7 +16,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  ArrowRight, Wallet, Plus, TrendingUp, TrendingDown, ArrowUpDown, Save, X, Landmark, ArrowLeftRight, Printer
+  ArrowRight, Wallet, Plus, TrendingUp, TrendingDown, ArrowUpDown, Save, X, Landmark, ArrowLeftRight, Printer, FolderOpen, User, ClipboardList, Handshake
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/hooks/use-toast";
@@ -512,22 +512,34 @@ const TreasuryDetail = () => {
                                 ) : null;
                               })()}
                               {tx.source_details && <span className="text-muted-foreground text-xs block">{tx.source_details}</span>}
-                              {linkedPurchase && (
-                                <div className="mt-1 text-xs space-y-0.5">
-                                  {linkedPurchase.projects?.name && (
-                                    <p className="text-muted-foreground">📁 {linkedPurchase.projects.name}</p>
-                                  )}
-                                  {linkedPurchase.projects?.clients?.name && (
-                                    <p className="text-muted-foreground">👤 {linkedPurchase.projects.clients.name}</p>
-                                  )}
-                                  {linkedPurchase.project_phases?.name && (
-                                    <p className="text-muted-foreground">📋 {linkedPurchase.project_phases.name}</p>
-                                  )}
-                                  {linkedPurchase.suppliers?.name && (
-                                    <p className="text-muted-foreground font-semibold">🤝 المورد: {linkedPurchase.suppliers.name}</p>
-                                  )}
-                                </div>
-                              )}
+                               {linkedPurchase && (
+                                 <div className="mt-1 text-xs space-y-0.5">
+                                   {linkedPurchase.projects?.name && (
+                                     <p className="text-muted-foreground flex items-center gap-1">
+                                       <FolderOpen className="h-3 w-3 inline text-muted-foreground" />
+                                       <span>{linkedPurchase.projects.name}</span>
+                                     </p>
+                                   )}
+                                   {linkedPurchase.projects?.clients?.name && (
+                                     <p className="text-muted-foreground flex items-center gap-1">
+                                       <User className="h-3 w-3 inline text-muted-foreground" />
+                                       <span>{linkedPurchase.projects.clients.name}</span>
+                                     </p>
+                                   )}
+                                   {linkedPurchase.project_phases?.name && (
+                                     <p className="text-muted-foreground flex items-center gap-1">
+                                       <ClipboardList className="h-3 w-3 inline text-muted-foreground" />
+                                       <span>{linkedPurchase.project_phases.name}</span>
+                                     </p>
+                                   )}
+                                   {linkedPurchase.suppliers?.name && (
+                                     <p className="text-muted-foreground font-semibold flex items-center gap-1">
+                                       <Handshake className="h-3 w-3 inline text-primary" />
+                                       <span>المورد: {linkedPurchase.suppliers.name}</span>
+                                     </p>
+                                   )}
+                                 </div>
+                               )}
                             </TableCell>
                             <TableCell>
                               {(() => {
